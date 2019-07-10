@@ -5,6 +5,9 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 # Default hyperparameters
 hparams = tf.contrib.training.HParams(
 	# Comma-separated list of cleaners to run on text prior to training and eval. For non-English

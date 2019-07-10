@@ -26,10 +26,9 @@ def log(msg, end='\n', slack=False):
 	print(msg, end=end)
 	if _file is not None:
 		_file.write('[%s]  %s\n' % (datetime.now().strftime(_format)[:-3], msg))
+		_file.flush()
 	if slack and _slack_url is not None:
 		Thread(target=_send_slack, args=(msg,)).start()
-	_file.flush()
-
 
 def _close_logfile():
 	global _file

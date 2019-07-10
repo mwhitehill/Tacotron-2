@@ -5,11 +5,13 @@ from functools import partial
 import numpy as np
 from datasets import audio
 from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
+from spk_disc import scoring
 
 folder_data = os.path.join(os.getcwd(), 'data')
+spk_emb_model, spk_emb_buckets = scoring.get_spk_emb_model()
 
 # def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
-def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
 
@@ -43,13 +45,13 @@ def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, n_jobs=12, t
 			text = parts[1]
 			emt_label = parts[2]
 			spk_label = parts[3]
-			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, index, wav_path, text, emt_label, spk_label, hparams)))
+			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams)))
 			index += 1
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
-def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, emt_label, spk_label, hparams):
+def _process_utterance(mel_dir, linear_dir, wav_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -157,15 +159,20 @@ def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, emt_
 	assert len(out) % audio.get_hop_size(hparams) == 0
 	time_steps = len(out)
 
+	#Get speaker embedding
+	spk_emb = scoring.get_embedding(spk_emb_model, spk_emb_buckets, wav_path)
+
 	# Write the spectrogram and audio to disk
 	audio_filename = 'audio-{}.npy'.format(index)
 	mel_filename = 'mel-{}.npy'.format(index)
 	linear_filename = 'linear-{}.npy'.format(index)
+	spk_emb_filename = 'spkemb-{}.npy'.format(index)
 	np.save(os.path.join(wav_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
 	np.save(os.path.join(mel_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
+	np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
 
 	basename = os.path.basename(wav_path)
 
 	# Return a tuple describing this training example
-	return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text, emt_label, spk_label, basename)
+	return (audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename)

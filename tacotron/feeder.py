@@ -8,8 +8,11 @@ import tensorflow as tf
 from infolog import log
 from sklearn.model_selection import train_test_split
 from tacotron.utils.text import text_to_sequence
+from hparams import hparams
 
 _batches_per_group = 64
+test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
+			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 
 class Feeder:
 	"""
@@ -32,19 +35,18 @@ class Feeder:
 
 		self._mel_dir = os.path.join(dataset_folder, 'mels')
 		self._linear_dir = os.path.join(dataset_folder, 'linear')
+		self._spk_emb_dir = os.path.join(dataset_folder, 'spkemb')
 
 		with open(metadata_filename, encoding='utf-8') as f:
 			self._metadata = [line.strip().split('|') for line in f]
 			frame_shift_ms = hparams.hop_size / hparams.sample_rate
-			hours = sum([int(x[4]) for x in self._metadata]) * frame_shift_ms / (3600)
+			hours = sum([int(x[5]) for x in self._metadata]) * frame_shift_ms / (3600)
 			log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
 
 		#Train test split
 		if hparams.tacotron_test_size is None:
 			assert hparams.tacotron_test_batches is not None
 
-		test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
-			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 		indices = np.arange(len(self._metadata))
 		train_indices, test_indices = train_test_split(indices,
 			test_size=test_size, random_state=hparams.tacotron_data_random_state)
@@ -86,13 +88,14 @@ class Feeder:
 			tf.placeholder(tf.int32, shape=(None, ), name='targets_lengths'),
 			tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos'),
       tf.placeholder(tf.int32, shape=(None,), name='emt_labels'),
-      tf.placeholder(tf.int32, shape=(None,), name='spk_labels')
+      tf.placeholder(tf.int32, shape=(None,), name='spk_labels'),
+			tf.placeholder(tf.float32, shape=(None, None), name='spk_emb'),
 			]
 
 			# Create queue for buffering data
-			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32], name='input_queue')
+			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32], name='input_queue')
 			self._enqueue_op = queue.enqueue(self._placeholders)
-			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths, self.split_infos, self.emt_labels, self.spk_labels = queue.dequeue()
+			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths, self.split_infos, self.emt_labels, self.spk_labels, self.spk_emb = queue.dequeue()
 
 			self.inputs.set_shape(self._placeholders[0].shape)
 			self.input_lengths.set_shape(self._placeholders[1].shape)
@@ -103,12 +106,14 @@ class Feeder:
 			self.split_infos.set_shape(self._placeholders[6].shape)
 			self.emt_labels.set_shape(self._placeholders[7].shape)
 			self.spk_labels.set_shape(self._placeholders[8].shape)
+			self.spk_emb.set_shape(self._placeholders[9].shape)
 
 			# Create eval queue for buffering eval data
-			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32], name='eval_queue')
+			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32], name='eval_queue')
 			self._eval_enqueue_op = eval_queue.enqueue(self._placeholders)
 			self.eval_inputs, self.eval_input_lengths, self.eval_mel_targets, self.eval_token_targets, \
-				self.eval_linear_targets, self.eval_targets_lengths, self.eval_split_infos, self.eval_emt_labels, self.eval_spk_labels  = eval_queue.dequeue()
+				self.eval_linear_targets, self.eval_targets_lengths, self.eval_split_infos, self.eval_emt_labels,\
+				self.eval_spk_labels, self.eval_spk_emb  = eval_queue.dequeue()
 
 			self.eval_inputs.set_shape(self._placeholders[0].shape)
 			self.eval_input_lengths.set_shape(self._placeholders[1].shape)
@@ -119,6 +124,7 @@ class Feeder:
 			self.eval_split_infos.set_shape(self._placeholders[6].shape)
 			self.eval_emt_labels.set_shape(self._placeholders[7].shape)
 			self.eval_spk_labels.set_shape(self._placeholders[8].shape)
+			self.eval_spk_emb.set_shape(self._placeholders[9].shape)
 
 	def start_threads(self, session):
 		self._session = session
@@ -134,16 +140,17 @@ class Feeder:
 		meta = self._test_meta[self._test_offset]
 		self._test_offset += 1
 
-		text = meta[5]
-		emt_label = meta[6]
-		spk_label = meta[7]
+		text = meta[6]
+		emt_label = meta[7]
+		spk_label = meta[8]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
 		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		return (input_data, mel_target, token_target, linear_target, emt_label, spk_label, len(mel_target))
+		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
 
 	def make_test_batches(self):
 		start = time.time()
@@ -200,16 +207,17 @@ class Feeder:
 		meta = self._train_meta[self._train_offset]
 		self._train_offset += 1
 
-		text = meta[5]
-		emt_label = meta[6]
-		spk_label = meta[7]
+		text = meta[6]
+		emt_label = meta[7]
+		spk_label = meta[8]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
 		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		return (input_data, mel_target, token_target, linear_target, emt_label, spk_label, len(mel_target))
+		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):
 		assert 0 == len(batches) % self._hparams.tacotron_num_gpus
@@ -220,6 +228,7 @@ class Feeder:
 		mel_targets = None
 		token_targets = None
 		linear_targets = None
+		spk_embs = None
 		split_infos = []
 
 		targets_lengths = np.asarray([x[-1] for x in batches], dtype=np.int32) #Used to mask loss
@@ -240,10 +249,14 @@ class Feeder:
 			token_targets = np.concatenate((token_targets, token_target_cur_device),axis=1) if token_targets is not None else token_target_cur_device
 			linear_targets_cur_device, linear_target_max_len = self._prepare_targets([x[3] for x in batch], outputs_per_step)
 			linear_targets = np.concatenate((linear_targets, linear_targets_cur_device), axis=1) if linear_targets is not None else linear_targets_cur_device
+
+			spk_emb_cur_device = np.stack([x[4] for x in batch])
+			spk_embs = np.concatenate((spk_embs, spk_emb_cur_device), axis=1) if spk_embs is not None else spk_emb_cur_device
+
 			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len])
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
-		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels)
+		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels, spk_embs)
 
 	def _prepare_inputs(self, inputs):
 		max_len = max([len(x) for x in inputs])
@@ -275,3 +288,36 @@ class Feeder:
 	def _round_down(self, x, multiple):
 		remainder = x % multiple
 		return x if remainder == 0 else x - remainder
+
+def test():
+
+	global _batches_per_group, test_size
+	_batches_per_group = 2
+	test_size = 64
+
+	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/emt4/train.txt'
+	coord = tf.train.Coordinator()
+	feeder = Feeder(coord, metadata_filename, hparams)
+
+	with tf.Session() as sess:
+		sess.run(tf.global_variables_initializer())
+		feeder.start_threads(sess)
+		vars = [feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, feeder.linear_targets,
+						feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.spk_emb]
+		outputs = sess.run(vars)
+		(inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels,
+		 	pk_labels, spk_emb) = outputs
+
+		print("mel_targets", len(mel_targets), mel_targets[0].shape)
+		print("linear_targets", len(linear_targets), linear_targets[0].shape)
+		print("inputs", inputs.shape)
+		print("token_targets", token_targets.shape)
+		print("spk_emb", spk_emb.shape)
+		print("input_lengths", input_lengths.shape)
+		print("targets_lengths", input_lengths.shape)
+		print("emt_labels", input_lengths.shape)
+		print("spk_labels", input_lengths.shape)
+		print("split_infos", split_infos.shape)
+
+if __name__ == '__main__':
+	test()
