@@ -107,3 +107,6 @@ venv.bak/
 logs-*/
 training_data/
 
+#Pycharm
+.idea
+

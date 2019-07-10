@@ -6,8 +6,10 @@ import numpy as np
 from datasets import audio
 from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
 
+folder_data = os.path.join(os.getcwd(), 'data')
 
-def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+# def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
 
@@ -28,21 +30,26 @@ def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12
 	# optimization purposes and it can be omited
 	executor = ProcessPoolExecutor(max_workers=n_jobs)
 	futures = []
-	index = 1
-	for input_dir in input_dirs:
-		with open(os.path.join(input_dir, 'metadata.csv'), encoding='utf-8') as f:
-			for line in f:
-				parts = line.strip().split('|')
-				basename = parts[0]
-				wav_path = os.path.join(input_dir, 'wavs', '{}.wav'.format(basename))
-				text = parts[2]
-				futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, basename, wav_path, text, hparams)))
-				index += 1
+	index = 0
+	# for input_dir in input_dirs:
+
+	df_metadata_path = os.path.join(folder_data, 'metadata_{}.txt'.format(dataset))
+	with open(df_metadata_path, encoding='utf-8') as f:
+		for line in f:
+			parts = line.strip().split('|')
+			path = parts[0]
+			wav_path = '{}.wav'.format(path)
+			# wav_path = os.path.join(input_dir, 'wavs', '{}.wav'.format(basename))
+			text = parts[1]
+			emt_label = parts[2]
+			spk_label = parts[3]
+			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, index, wav_path, text, emt_label, spk_label, hparams)))
+			index += 1
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
-def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hparams):
+def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, emt_label, spk_label, hparams):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -158,5 +165,7 @@ def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hpar
 	np.save(os.path.join(mel_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
 
+	basename = os.path.basename(wav_path)
+
 	# Return a tuple describing this training example
-	return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text)
+	return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text, emt_label, spk_label, basename)

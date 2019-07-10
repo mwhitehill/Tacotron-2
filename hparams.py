@@ -1,6 +1,10 @@
 import numpy as np
 import tensorflow as tf
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
 # Default hyperparameters
 hparams = tf.contrib.training.HParams(
 	# Comma-separated list of cleaners to run on text prior to training and eval. For non-English
@@ -77,9 +81,9 @@ hparams = tf.contrib.training.HParams(
 
 	#Mel spectrogram
 	n_fft = 2048, #Extra window size is filled with 0 paddings to match this parameter
-	hop_size = 275, #For 22050Hz, 275 ~= 12.5 ms (0.0125 * sample_rate)
-	win_size = 1100, #For 22050Hz, 1100 ~= 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
-	sample_rate = 22050, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
+	hop_size = 200, #275, #For 22050Hz, 275 ~= 12.5 ms (0.0125 * sample_rate)
+	win_size = 800, #1100, #For 22050Hz, 1100 ~= 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
+	sample_rate = 16000, #22050, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
 	frame_shift_ms = None, #Can replace hop_size parameter. (Recommended: 12.5)
 	magnitude_power = 2., #The power of the spectrogram magnitude (1. for energy, 2. for power)
 
@@ -172,7 +176,7 @@ hparams = tf.contrib.training.HParams(
 	mask_encoder = True, #whether to mask encoder padding while computing attention. Set to True for better prosody but slower convergence.
 	mask_decoder = False, #Whether to use loss mask for padded sequences (if False, <stop_token> loss function will not be weighted, else recommended pos_weight = 20)
 	cross_entropy_pos_weight = 1, #Use class weights to reduce the stop token classes imbalance (by adding more penalty on False Negatives (FN)) (1 = disabled)
-	predict_linear = True, #Whether to add a post-processing network to the Tacotron to predict linear spectrograms (True mode Not tested!!)
+	predict_linear = False, #True, #Whether to add a post-processing network to the Tacotron to predict linear spectrograms (True mode Not tested!!)
 	###########################################################################################################################################
 
 	#Wavenet
@@ -226,7 +230,7 @@ hparams = tf.contrib.training.HParams(
 
 	#global conditioning
 	gin_channels = -1, #Set this to -1 to disable global conditioning, Only used for multi speaker dataset. It defines the depth of the embeddings (Recommended: 16)
-	use_speaker_embedding = True, #whether to make a speaker embedding
+	use_speaker_embedding = False, #True, #whether to make a speaker embedding
 	n_speakers = 5, #number of speakers (rows of the embedding)
 	speakers_path = None, #Defines path to speakers metadata. Can be either in "speaker\tglobal_id" (with header) tsv format, or a single column tsv with speaker names. If None, use "speakers".
 	speakers = ['speaker0', 'speaker1', #List of speakers used for embeddings visualization. (Consult "wavenet_vocoder/train.py" if you want to modify the speaker names source).

@@ -25,8 +25,14 @@ class Feeder:
 		self._test_offset = 0
 
 		# Load metadata
-		self._mel_dir = os.path.join(os.path.dirname(metadata_filename), 'mels')
-		self._linear_dir = os.path.join(os.path.dirname(metadata_filename), 'linear')
+		# dataset_name = os.path.basename(metadata_filename).split('_')[1]
+		# data_folder = os.path.dirname(metadata_filename)
+		# dataset_folder = os.path.join(data_folder,dataset_name)
+		dataset_folder = os.path.dirname(metadata_filename)
+
+		self._mel_dir = os.path.join(dataset_folder, 'mels')
+		self._linear_dir = os.path.join(dataset_folder, 'linear')
+
 		with open(metadata_filename, encoding='utf-8') as f:
 			self._metadata = [line.strip().split('|') for line in f]
 			frame_shift_ms = hparams.hop_size / hparams.sample_rate
@@ -79,12 +85,14 @@ class Feeder:
 			tf.placeholder(tf.float32, shape=(None, None, hparams.num_freq), name='linear_targets'),
 			tf.placeholder(tf.int32, shape=(None, ), name='targets_lengths'),
 			tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos'),
+      tf.placeholder(tf.int32, shape=(None,), name='emt_labels'),
+      tf.placeholder(tf.int32, shape=(None,), name='spk_labels')
 			]
 
 			# Create queue for buffering data
-			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32], name='input_queue')
+			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32], name='input_queue')
 			self._enqueue_op = queue.enqueue(self._placeholders)
-			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths, self.split_infos = queue.dequeue()
+			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths, self.split_infos, self.emt_labels, self.spk_labels = queue.dequeue()
 
 			self.inputs.set_shape(self._placeholders[0].shape)
 			self.input_lengths.set_shape(self._placeholders[1].shape)
@@ -93,12 +101,14 @@ class Feeder:
 			self.linear_targets.set_shape(self._placeholders[4].shape)
 			self.targets_lengths.set_shape(self._placeholders[5].shape)
 			self.split_infos.set_shape(self._placeholders[6].shape)
+			self.emt_labels.set_shape(self._placeholders[7].shape)
+			self.spk_labels.set_shape(self._placeholders[8].shape)
 
 			# Create eval queue for buffering eval data
-			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32], name='eval_queue')
+			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32], name='eval_queue')
 			self._eval_enqueue_op = eval_queue.enqueue(self._placeholders)
 			self.eval_inputs, self.eval_input_lengths, self.eval_mel_targets, self.eval_token_targets, \
-				self.eval_linear_targets, self.eval_targets_lengths, self.eval_split_infos = eval_queue.dequeue()
+				self.eval_linear_targets, self.eval_targets_lengths, self.eval_split_infos, self.eval_emt_labels, self.eval_spk_labels  = eval_queue.dequeue()
 
 			self.eval_inputs.set_shape(self._placeholders[0].shape)
 			self.eval_input_lengths.set_shape(self._placeholders[1].shape)
@@ -107,6 +117,8 @@ class Feeder:
 			self.eval_linear_targets.set_shape(self._placeholders[4].shape)
 			self.eval_targets_lengths.set_shape(self._placeholders[5].shape)
 			self.eval_split_infos.set_shape(self._placeholders[6].shape)
+			self.eval_emt_labels.set_shape(self._placeholders[7].shape)
+			self.eval_spk_labels.set_shape(self._placeholders[8].shape)
 
 	def start_threads(self, session):
 		self._session = session
@@ -123,13 +135,15 @@ class Feeder:
 		self._test_offset += 1
 
 		text = meta[5]
+		emt_label = meta[6]
+		spk_label = meta[7]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
 		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		return (input_data, mel_target, token_target, linear_target, len(mel_target))
+		return (input_data, mel_target, token_target, linear_target, emt_label, spk_label, len(mel_target))
 
 	def make_test_batches(self):
 		start = time.time()
@@ -187,13 +201,15 @@ class Feeder:
 		self._train_offset += 1
 
 		text = meta[5]
+		emt_label = meta[6]
+		spk_label = meta[7]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
 		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		return (input_data, mel_target, token_target, linear_target, len(mel_target))
+		return (input_data, mel_target, token_target, linear_target, emt_label, spk_label, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):
 		assert 0 == len(batches) % self._hparams.tacotron_num_gpus
@@ -204,10 +220,11 @@ class Feeder:
 		mel_targets = None
 		token_targets = None
 		linear_targets = None
-		targets_lengths = None
 		split_infos = []
 
 		targets_lengths = np.asarray([x[-1] for x in batches], dtype=np.int32) #Used to mask loss
+		spk_labels = np.asarray([x[-2] for x in batches], dtype=np.int32)
+		emt_labels = np.asarray([x[-3] for x in batches], dtype = np.int32)
 		input_lengths = np.asarray([len(x[0]) for x in batches], dtype=np.int32)
 
 		#Produce inputs/targets of variables lengths for different GPUs
@@ -226,7 +243,7 @@ class Feeder:
 			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len])
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
-		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos)
+		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels)
 
 	def _prepare_inputs(self, inputs):
 		max_len = max([len(x) for x in inputs])
