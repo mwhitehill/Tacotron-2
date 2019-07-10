@@ -8,17 +8,18 @@ from tqdm import tqdm
 
 folder_data = os.path.join(os.getcwd(), 'data')
 
-def preprocess(args, out_dir, hparams):
+def preprocess(args, wav_folder, out_dir, hparams):
+	in_dir = os.path.join(args.folder_wav_dir, wav_folder)
 	mel_dir = os.path.join(out_dir, 'mels')
-	wav_dir = os.path.join(out_dir, 'audio')
+	audio_dir = os.path.join(out_dir, 'audio')
 	linear_dir = os.path.join(out_dir, 'linear')
 	spk_emb_dir = os.path.join(out_dir, 'spkemb')
 	os.makedirs(mel_dir, exist_ok=True)
-	os.makedirs(wav_dir, exist_ok=True)
+	os.makedirs(audio_dir, exist_ok=True)
 	os.makedirs(linear_dir, exist_ok=True)
 	os.makedirs(spk_emb_dir, exist_ok=True)
 	# metadata = preprocessor.build_from_path(hparams, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
-	metadata = preprocessor.build_from_path(hparams, args.dataset, mel_dir, linear_dir, wav_dir, spk_emb_dir, args.n_jobs, tqdm=tqdm)
+	metadata = preprocessor.build_from_path(hparams, args.dataset, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, args.n_jobs, tqdm=tqdm)
 	write_metadata(metadata, out_dir)
 
 def write_metadata(metadata, out_dir):
@@ -45,6 +46,9 @@ def norm_data(args):
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
+
+	if args.dataset == 'emt4':
+		return('Zo/Wav')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
@@ -83,12 +87,12 @@ def norm_data(args):
 
 def run_preprocess(args, hparams):
 	# input_folders = norm_data(args)
-	norm_data(args)
+	wav_dir = norm_data(args)
 	# output_folder = os.path.join(args.base_dir, args.output)
 	output_folder = os.path.join(folder_data, args.dataset)
 
 	# preprocess(args, input_folders, output_folder, hparams)
-	preprocess(args, output_folder, hparams)
+	preprocess(args, wav_dir, output_folder, hparams)
 
 def main():
 	print('initializing preprocessing..')
@@ -104,6 +108,7 @@ def main():
 	parser.add_argument('--book', default='northandsouth')
 	parser.add_argument('--output', default='training_data')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
+	parser.add_argument('--folder_wav_dir', default='../data/')
 	args = parser.parse_args()
 
 	modified_hp = hparams.parse(args.hparams)

@@ -110,3 +110,6 @@ training_data/
 #Pycharm
 .idea
 
+# Local Things
+checkpoints
+data

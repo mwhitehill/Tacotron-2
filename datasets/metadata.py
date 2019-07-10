@@ -16,7 +16,7 @@ def create_metadata_emt4():
   paths = []
   for i,(root, dirs, files) in enumerate(os.walk(folder_wav, topdown=True)):
     for f in files:
-      paths.append(os.path.join(root,f))
+      paths.append(os.path.join(os.path.basename(os.path.dirname(root)), os.path.basename(root),f))
 
   columns = ['path', 'script', 'emt_label', 'spk_id']
   df_metadata = pd.DataFrame([],columns=columns)

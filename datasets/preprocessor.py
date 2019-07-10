@@ -11,7 +11,7 @@ folder_data = os.path.join(os.getcwd(), 'data')
 spk_emb_model, spk_emb_buckets = scoring.get_spk_emb_model()
 
 # def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
-def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
+def build_from_path(hparams, dataset, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
 
@@ -40,18 +40,18 @@ def build_from_path(hparams, dataset, mel_dir, linear_dir, wav_dir, spk_emb_dir,
 		for line in f:
 			parts = line.strip().split('|')
 			path = parts[0]
-			wav_path = '{}.wav'.format(path)
-			# wav_path = os.path.join(input_dir, 'wavs', '{}.wav'.format(basename))
+			# wav_path = '{}.wav'.format(path)
+			wav_path = os.path.join(in_dir, '{}.wav'.format(path))
 			text = parts[1]
 			emt_label = parts[2]
 			spk_label = parts[3]
-			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams)))
+			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams)))
 			index += 1
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
-def _process_utterance(mel_dir, linear_dir, wav_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams):
+def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -167,7 +167,7 @@ def _process_utterance(mel_dir, linear_dir, wav_dir, spk_emb_dir, index, wav_pat
 	mel_filename = 'mel-{}.npy'.format(index)
 	linear_filename = 'linear-{}.npy'.format(index)
 	spk_emb_filename = 'spkemb-{}.npy'.format(index)
-	np.save(os.path.join(wav_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
+	np.save(os.path.join(audio_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
 	np.save(os.path.join(mel_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
