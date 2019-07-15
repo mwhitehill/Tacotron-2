@@ -7,11 +7,11 @@ from datasets import audio
 from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
 from spk_disc import scoring
 
-folder_data = os.path.join(os.getcwd(), 'data')
+folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
 spk_emb_model, spk_emb_buckets = scoring.get_spk_emb_model()
 
 # def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
-def build_from_path(hparams, dataset, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
+def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
 
@@ -33,9 +33,8 @@ def build_from_path(hparams, dataset, in_dir, mel_dir, linear_dir, audio_dir, sp
 	executor = ProcessPoolExecutor(max_workers=n_jobs)
 	futures = []
 	index = 0
-	# for input_dir in input_dirs:
 
-	df_metadata_path = os.path.join(folder_data, 'metadata_{}.txt'.format(dataset))
+	df_metadata_path = os.path.join(folder_data, 'metadata_{}.txt'.format(args.dataset))
 	with open(df_metadata_path, encoding='utf-8') as f:
 		for line in f:
 			parts = line.strip().split('|')
@@ -47,6 +46,10 @@ def build_from_path(hparams, dataset, in_dir, mel_dir, linear_dir, audio_dir, sp
 			spk_label = parts[3]
 			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams)))
 			index += 1
+
+			#Break after one sample if testing
+			if args.TEST:
+				break
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 

@@ -1,14 +1,15 @@
 import os
 import pandas as pd
 
-folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
+folder_data = os.path.join(os.path.dirname(os.path.dirname(os.getcwd())), 'data')
 
 def create_metadata_emt4():
 
   folder_wav = '//vibe15/PublicAll/STCM-101/Zo/Wav'
   folder_data_emt4 = os.path.join(folder_data, 'emt4')
+  os.makedirs(folder_data_emt4,exist_ok=True)
 
-  all_txt_path = os.path.join(folder_data_emt4, 'all_txt_wav.txt')
+  all_txt_path = os.path.join(folder_data, 'all_txt_wav.txt')
   df_all_txt = pd.read_csv(all_txt_path, sep='|', index_col=0,
                    names=['filename', 'script', 'emotion_label'])
   df_all_txt.emotion_label = df_all_txt.emotion_label.apply(int)

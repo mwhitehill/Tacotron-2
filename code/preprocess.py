@@ -6,7 +6,7 @@ from datasets import preprocessor
 from hparams import hparams
 from tqdm import tqdm
 
-folder_data = os.path.join(os.getcwd(), 'data')
+folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
 
 def preprocess(args, wav_folder, out_dir, hparams):
 	in_dir = os.path.join(args.folder_wav_dir, wav_folder)
@@ -18,8 +18,9 @@ def preprocess(args, wav_folder, out_dir, hparams):
 	os.makedirs(audio_dir, exist_ok=True)
 	os.makedirs(linear_dir, exist_ok=True)
 	os.makedirs(spk_emb_dir, exist_ok=True)
+	print(args.TEST)
 	# metadata = preprocessor.build_from_path(hparams, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
-	metadata = preprocessor.build_from_path(hparams, args.dataset, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, args.n_jobs, tqdm=tqdm)
+	metadata = preprocessor.build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, args.n_jobs, tqdm=tqdm)
 	write_metadata(metadata, out_dir)
 
 def write_metadata(metadata, out_dir):
@@ -90,7 +91,9 @@ def run_preprocess(args, hparams):
 	wav_dir = norm_data(args)
 	# output_folder = os.path.join(args.base_dir, args.output)
 	output_folder = os.path.join(folder_data, args.dataset)
-
+	if args.TEST:
+		output_folder += '_test'
+	os.makedirs(output_folder, exist_ok=True)
 	# preprocess(args, input_folders, output_folder, hparams)
 	preprocess(args, wav_dir, output_folder, hparams)
 
@@ -108,7 +111,8 @@ def main():
 	parser.add_argument('--book', default='northandsouth')
 	parser.add_argument('--output', default='training_data')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
-	parser.add_argument('--folder_wav_dir', default='../data/')
+	parser.add_argument('--folder_wav_dir', default='../../data/')
+	parser.add_argument('--TEST', default=False, action='store_true')
 	args = parser.parse_args()
 
 	modified_hp = hparams.parse(args.hparams)
