@@ -6,7 +6,7 @@ from scipy import signal
 from scipy.io import wavfile
 
 
-def load_wav(path, sr):
+def load_audio(path, sr):
 	return librosa.core.load(path, sr=sr)[0]
 
 def save_wav(wav, path, sr):

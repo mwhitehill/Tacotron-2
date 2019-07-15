@@ -18,7 +18,6 @@ def preprocess(args, wav_folder, out_dir, hparams):
 	os.makedirs(audio_dir, exist_ok=True)
 	os.makedirs(linear_dir, exist_ok=True)
 	os.makedirs(spk_emb_dir, exist_ok=True)
-	print(args.TEST)
 	# metadata = preprocessor.build_from_path(hparams, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
 	metadata = preprocessor.build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, args.n_jobs, tqdm=tqdm)
 	write_metadata(metadata, out_dir)
@@ -43,13 +42,15 @@ def norm_data(args):
 
 	print('Selecting data folders..')
 	# supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'M-AILABS']
-	supported_datasets = ['emt4']
+	supported_datasets = ['emt4','librispeech']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
 
 	if args.dataset == 'emt4':
 		return('Zo/Wav')
+	elif args.dataset == 'librispeech':
+		return ('train-clean-100')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
@@ -87,14 +88,11 @@ def norm_data(args):
 
 
 def run_preprocess(args, hparams):
-	# input_folders = norm_data(args)
 	wav_dir = norm_data(args)
-	# output_folder = os.path.join(args.base_dir, args.output)
 	output_folder = os.path.join(folder_data, args.dataset)
 	if args.TEST:
 		output_folder += '_test'
 	os.makedirs(output_folder, exist_ok=True)
-	# preprocess(args, input_folders, output_folder, hparams)
 	preprocess(args, wav_dir, output_folder, hparams)
 
 def main():

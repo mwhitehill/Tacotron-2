@@ -5,3 +5,6 @@ data
 papers
 venv
 *.sh
+plots
+wavs
+logs-Tacotron-2

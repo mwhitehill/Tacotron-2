@@ -10,7 +10,6 @@ from spk_disc import scoring
 folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
 spk_emb_model, spk_emb_buckets = scoring.get_spk_emb_model()
 
-# def build_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
 def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
@@ -39,22 +38,21 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 		for line in f:
 			parts = line.strip().split('|')
 			path = parts[0]
-			# wav_path = '{}.wav'.format(path)
-			wav_path = os.path.join(in_dir, '{}.wav'.format(path))
+			audio_path = os.path.join(in_dir, path)
 			text = parts[1]
 			emt_label = parts[2]
 			spk_label = parts[3]
-			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams)))
+			sex = parts[4]
+			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)))
 			index += 1
 
 			#Break after one sample if testing
 			if args.TEST:
 				break
-
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
-def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_path, text, emt_label, spk_label, hparams):
+def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -75,39 +73,37 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_p
 	"""
 	try:
 		# Load the audio as numpy array
-		wav = audio.load_wav(wav_path, sr=hparams.sample_rate)
+		aud = audio.load_audio(audio_path, sr=hparams.sample_rate)
 	except FileNotFoundError: #catch missing wav exception
-		print('file {} present in csv metadata is not present in wav folder. skipping!'.format(
-			wav_path))
+		print('file {} present in csv metadata is not present in wav folder. skipping!'.format(audio_path))
 		return None
-
 	#Trim lead/trail silences
 	if hparams.trim_silence:
-		wav = audio.trim_silence(wav, hparams)
+		aud = audio.trim_silence(aud, hparams)
 
 	#Pre-emphasize
-	preem_wav = audio.preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+	preem_aud = audio.preemphasis(aud, hparams.preemphasis, hparams.preemphasize)
 
-	#rescale wav
+	#rescale audio
 	if hparams.rescale:
-		wav = wav / np.abs(wav).max() * hparams.rescaling_max
-		preem_wav = preem_wav / np.abs(preem_wav).max() * hparams.rescaling_max
+		aud = aud / np.abs(aud).max() * hparams.rescaling_max
+		preem_wav = preem_aud / np.abs(preem_aud).max() * hparams.rescaling_max
 
 		#Assert all audio is in [-1, 1]
-		if (wav > 1.).any() or (wav < -1.).any():
-			raise RuntimeError('wav has invalid value: {}'.format(wav_path))
-		if (preem_wav > 1.).any() or (preem_wav < -1.).any():
-			raise RuntimeError('wav has invalid value: {}'.format(wav_path))
+		if (aud > 1.).any() or (aud < -1.).any():
+			raise RuntimeError('audio has invalid value: {}'.format(audio_path))
+		if (preem_aud > 1.).any() or (preem_aud < -1.).any():
+			raise RuntimeError('audio has invalid value: {}'.format(audio_path))
 
 	#Mu-law quantize
 	if is_mulaw_quantize(hparams.input_type):
 		#[0, quantize_channels)
-		out = mulaw_quantize(wav, hparams.quantize_channels)
+		out = mulaw_quantize(aud, hparams.quantize_channels)
 
 		#Trim silences
 		start, end = audio.start_and_end_indices(out, hparams.silence_threshold)
-		wav = wav[start: end]
-		preem_wav = preem_wav[start: end]
+		aud = aud[start: end]
+		preem_aud = preem_aud[start: end]
 		out = out[start: end]
 
 		constant_values = mulaw_quantize(0, hparams.quantize_channels)
@@ -115,25 +111,25 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_p
 
 	elif is_mulaw(hparams.input_type):
 		#[-1, 1]
-		out = mulaw(wav, hparams.quantize_channels)
+		out = mulaw(aud, hparams.quantize_channels)
 		constant_values = mulaw(0., hparams.quantize_channels)
 		out_dtype = np.float32
 
 	else:
 		#[-1, 1]
-		out = wav
+		out = aud
 		constant_values = 0.
 		out_dtype = np.float32
 
-	# Compute the mel scale spectrogram from the wav
-	mel_spectrogram = audio.melspectrogram(preem_wav, hparams).astype(np.float32)
+	# Compute the mel scale spectrogram from the audio
+	mel_spectrogram = audio.melspectrogram(preem_aud, hparams).astype(np.float32)
 	mel_frames = mel_spectrogram.shape[1]
 
 	if mel_frames > hparams.max_mel_frames and hparams.clip_mels_length:
 		return None
 
-	#Compute the linear scale spectrogram from the wav
-	linear_spectrogram = audio.linearspectrogram(preem_wav, hparams).astype(np.float32)
+	#Compute the linear scale spectrogram from the audui
+	linear_spectrogram = audio.linearspectrogram(preem_aud, hparams).astype(np.float32)
 	linear_frames = linear_spectrogram.shape[1]
 
 	#sanity check
@@ -142,13 +138,13 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_p
 	if hparams.use_lws:
 		#Ensure time resolution adjustement between audio and mel-spectrogram
 		fft_size = hparams.n_fft if hparams.win_size is None else hparams.win_size
-		l, r = audio.pad_lr(wav, fft_size, audio.get_hop_size(hparams))
+		l, r = audio.pad_lr(aud, fft_size, audio.get_hop_size(hparams))
 
 		#Zero pad audio signal
 		out = np.pad(out, (l, r), mode='constant', constant_values=constant_values)
 	else:
 		#Ensure time resolution adjustement between audio and mel-spectrogram
-		l_pad, r_pad = audio.librosa_pad_lr(wav, hparams.n_fft, audio.get_hop_size(hparams), hparams.wavenet_pad_sides)
+		l_pad, r_pad = audio.librosa_pad_lr(aud, hparams.n_fft, audio.get_hop_size(hparams), hparams.wavenet_pad_sides)
 
 		#Reflect pad audio signal on the right (Just like it's done in Librosa to avoid frame inconsistency)
 		out = np.pad(out, (l_pad, r_pad), mode='constant', constant_values=constant_values)
@@ -163,7 +159,7 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_p
 	time_steps = len(out)
 
 	#Get speaker embedding
-	spk_emb = scoring.get_embedding(spk_emb_model, spk_emb_buckets, wav_path)
+	spk_emb = scoring.get_embedding(spk_emb_model, spk_emb_buckets, audio_path)
 
 	# Write the spectrogram and audio to disk
 	audio_filename = 'audio-{}.npy'.format(index)
@@ -175,7 +171,6 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, wav_p
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
 
-	basename = os.path.basename(wav_path)
-
+	basename = os.path.basename(audio_path)
 	# Return a tuple describing this training example
-	return (audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename)
+	return (audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename, sex)

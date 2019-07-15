@@ -35,7 +35,7 @@ def prepare_run(args):
 	modified_hp = hparams.parse(args.hparams)
 	os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(args.tf_log_level)
 	run_name = args.name or args.model
-	log_dir = os.path.join(args.base_dir, 'logs-{}'.format(run_name))
+	log_dir = '../logs-{}'.format(run_name)
 	os.makedirs(log_dir, exist_ok=True)
 	infolog.init(os.path.join(log_dir, 'Terminal_train_log'), run_name, args.slack_url)
 	return log_dir, modified_hp
