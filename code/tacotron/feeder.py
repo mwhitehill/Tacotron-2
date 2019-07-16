@@ -89,7 +89,7 @@ class Feeder:
 			tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos'),
       tf.placeholder(tf.int32, shape=(None,), name='emt_labels'),
       tf.placeholder(tf.int32, shape=(None,), name='spk_labels'),
-			tf.placeholder(tf.float32, shape=(None, None), name='spk_emb'),
+			tf.placeholder(tf.float32, shape=(None, hparams.tacotron_num_gpus*hparams.tacotron_spk_emb_dim), name='spk_emb'),
 			]
 
 			# Create queue for buffering data
@@ -150,6 +150,7 @@ class Feeder:
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
 		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
 		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
 
 	def make_test_batches(self):
@@ -217,6 +218,7 @@ class Feeder:
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
 		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
 		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):
@@ -239,6 +241,7 @@ class Feeder:
 		#Produce inputs/targets of variables lengths for different GPUs
 		for i in range(self._hparams.tacotron_num_gpus):
 			batch = batches[size_per_device * i: size_per_device * (i + 1)]
+
 			input_cur_device, input_max_len = self._prepare_inputs([x[0] for x in batch])
 			inputs = np.concatenate((inputs, input_cur_device), axis=1) if inputs is not None else input_cur_device
 			mel_target_cur_device, mel_target_max_len = self._prepare_targets([x[1] for x in batch], outputs_per_step)
@@ -252,8 +255,9 @@ class Feeder:
 
 			spk_emb_cur_device = np.stack([x[4] for x in batch])
 			spk_embs = np.concatenate((spk_embs, spk_emb_cur_device), axis=1) if spk_embs is not None else spk_emb_cur_device
+			# print("mel",mel_targets.shape)
 
-			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len])
+			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len, hparams.tacotron_spk_emb_dim])
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
 		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels, spk_embs)

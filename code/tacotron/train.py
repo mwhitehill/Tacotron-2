@@ -84,11 +84,11 @@ def model_train_mode(args, feeder, hparams, global_step):
 		if hparams.predict_linear:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb)
 		else:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -103,11 +103,12 @@ def model_test_mode(args, feeder, hparams, global_step):
 		if hparams.predict_linear:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
-				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos)
+				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
+				spk_emb= feeder.eval_spk_emb)
 		else:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True, 
-				split_infos=feeder.eval_split_infos)
+				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_emb= feeder.eval_spk_emb)
 		model.add_loss()
 		return model
 
@@ -195,7 +196,6 @@ def train(log_dir, args, hparams):
 			summary_writer = tf.summary.FileWriter(tensorboard_dir, sess.graph)
 
 			sess.run(tf.global_variables_initializer())
-
 			#saved model restoring
 			if args.restore:
 				# Restore saved model if the user requested it, default = True

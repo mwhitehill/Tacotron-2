@@ -44,7 +44,6 @@ def train(args, log_dir, hparams):
 	state_file = os.path.join(log_dir, 'state_log')
 	#Get training states
 	(taco_state, GTA_state, wave_state), input_path = read_seq(state_file)
-
 	if not taco_state:
 		log('\n#############################################################\n')
 		log('Tacotron Train\n')
@@ -102,7 +101,7 @@ def main():
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
-	parser.add_argument('--restore', type=bool, default=True, help='Set this to False to do a fresh training')
+	parser.add_argument('--restore', action='store_true', default=False, help='Set this to False to do a fresh training')
 	parser.add_argument('--summary_interval', type=int, default=250,
 		help='Steps between running summary ops')
 	parser.add_argument('--embedding_interval', type=int, default=5000,
@@ -116,7 +115,6 @@ def main():
 	parser.add_argument('--tf_log_level', type=int, default=1, help='Tensorflow C++ log level.')
 	parser.add_argument('--slack_url', default=None, help='slack webhook notification destination link')
 	args = parser.parse_args()
-
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']
 
 	if args.model not in accepted_models:

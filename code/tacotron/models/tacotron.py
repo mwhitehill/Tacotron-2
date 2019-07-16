@@ -26,7 +26,7 @@ class Tacotron():
 		self._hparams = hparams
 
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, gta=False,
-			global_step=None, is_training=False, is_evaluating=False, split_infos=None):
+			global_step=None, is_training=False, is_evaluating=False, split_infos=None, emt_labels=None, spk_emb=None):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -60,8 +60,10 @@ class Tacotron():
 
 			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
+			tower_emt_labels = tf.to_float(tf.split(emt_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0))
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
+			p_spk_emb = tf.py_func(split_func, [spk_emb, split_infos[:, 4]], lout_float) if spk_emb is not None else spk_emb
 			p_mel_targets = tf.py_func(split_func, [mel_targets, split_infos[:,1]], lout_float) if mel_targets is not None else mel_targets
 			p_stop_token_targets = tf.py_func(split_func, [stop_token_targets, split_infos[:,2]], lout_float) if stop_token_targets is not None else stop_token_targets
 			p_linear_targets = tf.py_func(split_func, [linear_targets, split_infos[:,3]], lout_float) if linear_targets is not None else linear_targets
@@ -70,12 +72,14 @@ class Tacotron():
 			tower_mel_targets = []
 			tower_stop_token_targets = []
 			tower_linear_targets = []
+			tower_spk_emb = []
 
 			batch_size = tf.shape(inputs)[0]
 			mel_channels = hp.num_mels
 			linear_channels = hp.num_freq
 			for i in range (hp.tacotron_num_gpus):
 				tower_inputs.append(tf.reshape(p_inputs[i], [batch_size, -1]))
+				tower_spk_emb.append(tf.reshape(p_spk_emb[i], [-1, self._hparams.tacotron_spk_emb_dim]))
 				if p_mel_targets is not None:
 					tower_mel_targets.append(tf.reshape(p_mel_targets[i], [batch_size, -1, mel_channels]))
 				if p_stop_token_targets is not None:
@@ -167,7 +171,7 @@ class Tacotron():
 
 					#Decode
 					(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(
-						CustomDecoder(decoder_cell, self.helper, decoder_init_state),
+						CustomDecoder(decoder_cell, self.helper, decoder_init_state, tower_spk_emb[i], tower_emt_labels[i]),
 						impute_finished=False,
 						maximum_iterations=max_iters,
 						swap_memory=hp.tacotron_swap_with_cpu)
