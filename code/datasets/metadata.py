@@ -65,7 +65,10 @@ def create_metadata_librispeech():
       continue
     spk_id = os.path.basename(os.path.dirname(root))
     book_no = os.path.basename(root)
-    sex = df_speakers.loc[int(spk_id)].values[0][1]
+    try:
+      sex = df_speakers.loc[int(spk_id)].values[0][1]
+    except KeyError:
+      sex = 'N'
 
     #get transcripts in a dataframe
     df_trans = get_librispeech_transcript(root, spk_id, book_no)
@@ -81,7 +84,8 @@ def create_metadata_librispeech():
       emt_label = 0
       df_metadata = df_metadata.append(pd.DataFrame([[path.replace('\\','/'),script[:-1],emt_label,spk_id,sex]],columns=columns),ignore_index=True)
 
-    break
+    if i%100 ==0:
+      print("Books Complete:",i)
 
   df_metadata_path = os.path.join(folder_data, 'metadata_librispeech.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)

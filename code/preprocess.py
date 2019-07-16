@@ -50,7 +50,7 @@ def norm_data(args):
 	if args.dataset == 'emt4':
 		return('Zo/Wav')
 	elif args.dataset == 'librispeech':
-		return ('train-clean-100')
+		return ('LibriSpeech/train-clean-100')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
