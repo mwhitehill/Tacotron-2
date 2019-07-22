@@ -102,6 +102,17 @@ hparams = tf.contrib.training.HParams(
 	symmetric_mels = True, #Whether to scale the data to be symmetric around 0. (Also multiplies the output range by 2, faster and cleaner convergence)
 	max_abs_value = 4., #max absolute value of data. If symmetric, data will be [-max, max] else [0, max] (Must not be too big to avoid gradient explosion, 
 																										  #not too small for fast convergence)
+
+	#Global style token
+	use_gst=True,     # When false, the scripit will do as the paper  "Towards End-to-End Prosody Transfer for Expressive Speech Synthesis with Tacotron"
+	num_gst=10,
+	num_heads=4,       # Head number for multi-head attention
+	style_embed_depth=256,
+	reference_filters=[32, 32, 64, 64, 128, 128],
+	reference_depth=128,
+	style_att_type="mlp_attention", # Attention type for style attention module (dot_attention, mlp_attention)
+	style_att_dim=128,
+
 	normalize_for_wavenet = True, #whether to rescale to [0, 1] for wavenet. (better audio quality)
 	clip_for_wavenet = True, #whether to clip [-max, max] before training/synthesizing with wavenet (better audio quality)
 	wavenet_pad_sides = 1, #Can be 1 or 2. 1 for pad right only, 2 for both sides padding.

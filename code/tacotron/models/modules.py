@@ -1,5 +1,24 @@
 import tensorflow as tf
 
+def reference_encoder(inputs, filters, kernel_size, strides, encoder_cell, is_training, scope='ref_encoder'):
+  with tf.variable_scope(scope):
+    ref_outputs = tf.expand_dims(inputs,axis=-1)
+    # CNN stack
+    for i, channel in enumerate(filters):
+      ref_outputs = conv2d(ref_outputs, channel, kernel_size, strides, tf.nn.relu, is_training, 'conv2d_%d' % i)
+
+    shapes = shape_list(ref_outputs)
+    ref_outputs = tf.reshape(
+      ref_outputs,
+      shapes[:-2] + [shapes[2] * shapes[3]])
+    # RNN
+    encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+      encoder_cell,
+      ref_outputs,
+      dtype=tf.float32)
+
+    reference_state = tf.layers.dense(encoder_outputs[:,-1,:], 128, activation=tf.nn.tanh) # [N, 128]
+    return reference_state
 
 class HighwayNet:
 	def __init__(self, units, name=None):
@@ -390,6 +409,19 @@ def conv1d(inputs, kernel_size, channels, activation, is_training, drop_rate, bn
 		return tf.layers.dropout(activated, rate=drop_rate, training=is_training,
 								name='dropout_{}'.format(scope))
 
+def conv2d(inputs, filters, kernel_size, strides, activation, is_training, scope):
+  with tf.variable_scope(scope):
+    conv2d_output = tf.layers.conv2d(
+      inputs,
+      filters=filters,
+      kernel_size=kernel_size,
+      strides=strides,
+      padding='same')
+    conv2d_output = tf.layers.batch_normalization(conv2d_output, training=is_training)
+    if activation is not None:
+      conv2d_output = activation(conv2d_output)
+    return conv2d_output
+
 def _round_up_tf(x, multiple):
 	# Tf version of remainder = x % multiple
 	remainder = tf.mod(x, multiple)
@@ -483,3 +515,22 @@ def MaskedLinearLoss(targets, outputs, targets_lengths, hparams, mask=None):
 	mean_l1_low = tf.reduce_sum(masked_l1_low) / tf.reduce_sum(mask_)
 
 	return 0.5 * mean_l1 + 0.5 * mean_l1_low
+
+def shape_list(x):
+  """Return list of dims, statically where possible."""
+  x = tf.convert_to_tensor(x)
+
+  # If unknown rank, return dynamic shape
+  if x.get_shape().dims is None:
+    return tf.shape(x)
+
+  static = x.get_shape().as_list()
+  shape = tf.shape(x)
+
+  ret = []
+  for i in range(len(static)):
+    dim = static[i]
+    if dim is None:
+      dim = shape[i]
+    ret.append(dim)
+  return ret
