@@ -45,6 +45,7 @@ def add_train_stats(model, hparams):
 			tf.summary.histogram('mel_targets %d' % i, model.tower_mel_targets[i])
 		tf.summary.scalar('before_loss', model.before_loss)
 		tf.summary.scalar('after_loss', model.after_loss)
+		tf.summary.scalar('emt_disc_loss', model.emt_disc_loss)
 
 		if hparams.predict_linear:
 			tf.summary.scalar('linear_loss', model.linear_loss)
@@ -84,11 +85,13 @@ def model_train_mode(args, feeder, hparams, global_step):
 		if hparams.predict_linear:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb,
+				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
 		else:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb,
+				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -104,11 +107,12 @@ def model_test_mode(args, feeder, hparams, global_step):
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
 				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
-				spk_emb= feeder.eval_spk_emb)
+				spk_emb= feeder.eval_spk_emb, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
 		else:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True, 
-				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_emb= feeder.eval_spk_emb)
+				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_emb= feeder.eval_spk_emb,
+				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
 		model.add_loss()
 		return model
 
@@ -181,6 +185,9 @@ def train(log_dir, args, hparams):
 	step = 0
 	time_window = ValueWindow(100)
 	loss_window = ValueWindow(100)
+	if args.emt_disc:
+		emt_disc_loss_window = ValueWindow(100)
+		emt_disc_acc_window = ValueWindow(100)
 	saver = tf.train.Saver(max_to_keep=20)
 
 	log('Tacotron training set to a maximum of {} steps'.format(args.tacotron_train_steps))
@@ -222,11 +229,21 @@ def train(log_dir, args, hparams):
 			#Training loop
 			while not coord.should_stop() and step < args.tacotron_train_steps:
 				start_time = time.time()
-				step, loss, opt = sess.run([global_step, model.loss, model.optimize])
+				if args.emt_disc:
+					step, loss, opt, emt_disc_loss, emt_disc_acc = sess.run([global_step, model.loss,model.optimize,model.emt_disc_loss,model.emt_disc_acc])
+				else:
+					step, loss, opt = sess.run([global_step, model.loss,model.optimize])
 				time_window.append(time.time() - start_time)
 				loss_window.append(loss)
-				message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
-					step, time_window.average, loss, loss_window.average)
+				if args.emt_disc:
+					emt_disc_loss_window.append(emt_disc_loss)
+					emt_disc_acc_window.append(emt_disc_acc)
+					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.4f}, emt_disc_acc={:4.2f}%]'.format(
+						step, time_window.average, loss, loss_window.average, emt_disc_loss_window.average, emt_disc_acc_window.average*100)
+				else:
+					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
+						step, time_window.average, loss, loss_window.average)
+
 				log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
 				if np.isnan(loss) or loss > 100.:

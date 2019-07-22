@@ -106,7 +106,7 @@ def main():
 		help='Steps between running summary ops')
 	parser.add_argument('--embedding_interval', type=int, default=5000,
 		help='Steps between updating embeddings projection visualization')
-	parser.add_argument('--checkpoint_interval', type=int, default=2500,
+	parser.add_argument('--checkpoint_interval', type=int, default=300,
 		help='Steps between writing checkpoints')
 	parser.add_argument('--eval_interval', type=int, default=5000,
 		help='Steps between eval on test data')
@@ -114,7 +114,10 @@ def main():
 	parser.add_argument('--wavenet_train_steps', type=int, default=500000, help='total number of wavenet training steps')
 	parser.add_argument('--tf_log_level', type=int, default=1, help='Tensorflow C++ log level.')
 	parser.add_argument('--slack_url', default=None, help='slack webhook notification destination link')
+	parser.add_argument('--emt_disc', action='store_true', default=False, help='whether to use emotion discriminator as part of loss')
+	parser.add_argument('--spk_disc', action='store_true', default=False, help='whether to use speaker discriminator as part of loss')
 	args = parser.parse_args()
+
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']
 
 	if args.model not in accepted_models:

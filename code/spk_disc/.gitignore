@@ -1,0 +1,6 @@
+.idea
+__pycache__
+test_tisv
+train_tisv
+Results
+pretrained_model

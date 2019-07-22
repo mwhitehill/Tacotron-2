@@ -4,11 +4,10 @@ from util.ops import shape_list
 
 class Emt_Disc:
 
-  def __init__(self, inputs, is_training, hparams, scope='emt_disc'):
+  def __init__(self, inputs, is_training, hparams=None, scope='emt_disc'):
 
     self._hparams = hparams
     filters = [32, 32, 64, 64, 128, 128]
-    # filters = [32, 64]
     kernel_size = (3, 3)
     strides = (2,2)
 

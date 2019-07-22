@@ -8,6 +8,8 @@ from tacotron.models.Architecture_wrappers import TacotronEncoderCell, TacotronD
 from tacotron.models.custom_decoder import CustomDecoder
 from tacotron.models.attention import LocationSensitiveAttention
 
+from emt_disc.networks import Emt_Disc
+
 import numpy as np
 
 def split_func(x, split_pos):
@@ -26,7 +28,8 @@ class Tacotron():
 		self._hparams = hparams
 
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, gta=False,
-			global_step=None, is_training=False, is_evaluating=False, split_infos=None, emt_labels=None, spk_emb=None):
+			global_step=None, is_training=False, is_evaluating=False, split_infos=None, emt_labels=None, spk_emb=None,
+			use_emt_disc = False, use_spk_disc = False):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -51,6 +54,9 @@ class Tacotron():
 			raise RuntimeError('Model set to mask paddings but no targets lengths provided for the mask!')
 		if is_training and is_evaluating:
 			raise RuntimeError('Model can not be in training and evaluation modes at the same time!')
+
+		self.use_emt_disc = use_emt_disc
+		self.use_spk_disc = use_spk_disc
 
 		split_device = '/cpu:0' if self._hparams.tacotron_num_gpus > 1 or self._hparams.split_on_cpu else '/gpu:0'
 		with tf.device(split_device):
@@ -94,6 +100,7 @@ class Tacotron():
 		self.tower_stop_token_prediction = []
 		self.tower_mel_outputs = []
 		self.tower_linear_outputs = []
+		self.tower_emt_disc_outputs = []
 
 		tower_embedded_inputs = []
 		tower_enc_conv_output_shape = []
@@ -203,7 +210,6 @@ class Tacotron():
 					if hp.clip_outputs:
 							mel_outputs = tf.minimum(tf.maximum(mel_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
 
-
 					if post_condition:
 						# Add post-processing CBHG. This does a great job at extracting features from mels before projection to Linear specs.
 						post_cbhg = CBHG(hp.cbhg_kernels, hp.cbhg_conv_channels, hp.cbhg_pool_size, [hp.cbhg_projection, hp.num_mels],
@@ -221,6 +227,11 @@ class Tacotron():
 
 						if hp.clip_outputs:
 							linear_outputs = tf.minimum(tf.maximum(linear_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+
+					#Emotion Discriminator
+					if use_emt_disc:
+						emt_disc = Emt_Disc(mel_outputs, is_training=is_training)
+						self.tower_emt_disc_outputs.append(emt_disc.logit)
 
 					#Grab alignments from the final decoder state
 					alignments = tf.transpose(final_decoder_state.alignment_history.stack(), [1, 2, 0])
@@ -248,6 +259,7 @@ class Tacotron():
 		self.tower_linear_targets = tower_linear_targets
 		self.tower_targets_lengths = tower_targets_lengths
 		self.tower_stop_token_targets = tower_stop_token_targets
+		self.tower_emt_labels = tower_emt_labels
 
 		self.all_vars = tf.trainable_variables()
 
@@ -290,7 +302,13 @@ class Tacotron():
 		total_stop_token_loss = 0
 		total_regularization_loss = 0
 		total_linear_loss = 0
+
 		total_loss = 0
+
+		self.tower_emt_disc_loss = []
+		self.tower_emt_disc_acc = []
+		total_emt_disc_loss = 0
+		total_emt_disc_acc = 0
 
 		gpus = ["/gpu:{}".format(i) for i in range(hp.tacotron_num_gpus)]
 
@@ -334,6 +352,15 @@ class Tacotron():
 						else:
 							linear_loss = 0.
 
+					if self.use_emt_disc:
+						emt_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_emt_labels[i]), 4)
+						emt_disc_logit = self.tower_emt_disc_outputs[i]
+						emt_disc_loss = tf.reduce_mean(
+							tf.nn.softmax_cross_entropy_with_logits(logits=emt_disc_logit, labels=emt_labels_one_hot))
+						emt_disc_acc = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(emt_labels_one_hot, 1), tf.argmax(emt_disc_logit, 1)), 'float32'))
+					else:
+						emt_disc_loss = 0.
+						emt_disc_acc = 0.
 					# Compute the regularization weight
 					if hp.tacotron_scale_regularization:
 						reg_weight_scaler = 1. / (2 * hp.max_abs_value) if hp.symmetric_mels else 1. / (hp.max_abs_value)
@@ -354,23 +381,32 @@ class Tacotron():
 					self.tower_stop_token_loss.append(stop_token_loss)
 					self.tower_regularization_loss.append(regularization)
 					self.tower_linear_loss.append(linear_loss)
+					self.tower_emt_disc_loss.append(emt_disc_loss)
 
-					tower_loss = before + after + stop_token_loss + regularization + linear_loss
+					tower_loss = before + after + stop_token_loss + regularization + linear_loss + emt_disc_loss
 					self.tower_loss.append(tower_loss)
+
+					self.tower_emt_disc_acc.append(emt_disc_acc)
 
 			total_before_loss += before
 			total_after_loss += after
 			total_stop_token_loss += stop_token_loss
 			total_regularization_loss += regularization
 			total_linear_loss += linear_loss
+			total_emt_disc_loss += emt_disc_loss
 			total_loss += tower_loss
+
+			total_emt_disc_acc += emt_disc_acc
 
 		self.before_loss = total_before_loss / hp.tacotron_num_gpus
 		self.after_loss = total_after_loss / hp.tacotron_num_gpus
 		self.stop_token_loss = total_stop_token_loss / hp.tacotron_num_gpus
 		self.regularization_loss = total_regularization_loss / hp.tacotron_num_gpus
 		self.linear_loss = total_linear_loss / hp.tacotron_num_gpus
+		self.emt_disc_loss = total_emt_disc_loss / hp.tacotron_num_gpus
 		self.loss = total_loss / hp.tacotron_num_gpus
+
+		self.emt_disc_acc = total_emt_disc_acc / hp.tacotron_num_gpus
 
 	def add_optimizer(self, global_step):
 		'''Adds optimizer. Sets "gradients" and "optimize" fields. add_loss must have been called.
