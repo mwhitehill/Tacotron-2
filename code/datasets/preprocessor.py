@@ -5,10 +5,8 @@ from functools import partial
 import numpy as np
 from datasets import audio
 from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
-from spk_disc import scoring
 
 folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
-spk_emb_model, spk_emb_buckets = scoring.get_spk_emb_model()
 
 def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_emb_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
@@ -29,7 +27,8 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 
 	# We use ProcessPoolExecutor to parallelize across processes, this is just for
 	# optimization purposes and it can be omited
-	executor = ProcessPoolExecutor(max_workers=n_jobs)
+	if not(args.philly):
+		executor = ProcessPoolExecutor(max_workers=n_jobs)
 	futures = []
 	index = 0
 
@@ -43,13 +42,22 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 			emt_label = parts[2]
 			spk_label = parts[3]
 			sex = parts[4]
-			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)))
+			if args.philly:
+				futures.append(_process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams))
+			else:
+				futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)))
 			index += 1
+
+			if args.philly and index % 100 ==0:
+				print("samples done:", index)
 
 			#Break after one sample if testing
 			if args.TEST:
 				break
-	return [future.result() for future in tqdm(futures) if future.result() is not None]
+	if args.philly:
+		return [f for f in futures if f is not None]
+	else:
+		return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
 def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams):
@@ -87,7 +95,7 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio
 	#rescale audio
 	if hparams.rescale:
 		aud = aud / np.abs(aud).max() * hparams.rescaling_max
-		preem_wav = preem_aud / np.abs(preem_aud).max() * hparams.rescaling_max
+		preem_aud = preem_aud / np.abs(preem_aud).max() * hparams.rescaling_max
 
 		#Assert all audio is in [-1, 1]
 		if (aud > 1.).any() or (aud < -1.).any():
@@ -125,8 +133,8 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio
 	mel_spectrogram = audio.melspectrogram(preem_aud, hparams).astype(np.float32)
 	mel_frames = mel_spectrogram.shape[1]
 
-	if mel_frames > hparams.max_mel_frames and hparams.clip_mels_length:
-		return None
+	# if mel_frames > hparams.max_mel_frames and hparams.clip_mels_length:
+	# 	return None
 
 	#Compute the linear scale spectrogram from the audui
 	linear_spectrogram = audio.linearspectrogram(preem_aud, hparams).astype(np.float32)
@@ -159,7 +167,7 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio
 	time_steps = len(out)
 
 	#Get speaker embedding
-	spk_emb = scoring.get_embedding(spk_emb_model, spk_emb_buckets, audio_path)
+	#spk_emb = scoring.get_embedding(spk_emb_model, spk_emb_buckets, audio_path)
 
 	# Write the spectrogram and audio to disk
 	audio_filename = 'audio-{}.npy'.format(index)
@@ -169,7 +177,7 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio
 	np.save(os.path.join(audio_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
 	np.save(os.path.join(mel_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
-	np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
+	#np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
 
 	basename = os.path.basename(audio_path)
 	# Return a tuple describing this training example

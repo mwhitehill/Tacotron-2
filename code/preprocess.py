@@ -111,6 +111,7 @@ def main():
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
 	parser.add_argument('--folder_wav_dir', default='../../data/')
 	parser.add_argument('--TEST', default=False, action='store_true')
+	parser.add_argument('--philly', default=False, action='store_true')
 	args = parser.parse_args()
 
 	modified_hp = hparams.parse(args.hparams)
