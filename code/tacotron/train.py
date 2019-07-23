@@ -85,13 +85,15 @@ def model_train_mode(args, feeder, hparams, global_step):
 		if hparams.predict_linear:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb,
-				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
+				ref_type=feeder.ref_type, ref_mel= feeder.ref_mel, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+				use_intercross=args.intercross)
 		else:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_emb= feeder.spk_emb,
-				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
+				ref_type=feeder.ref_type, ref_mel=feeder.ref_mel, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+				use_intercross=args.intercross)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -107,12 +109,14 @@ def model_test_mode(args, feeder, hparams, global_step):
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
 				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
-				spk_emb= feeder.eval_spk_emb, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
+				spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb, ref_type=feeder.ref_type, ref_mel= feeder.ref_mel,
+				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross)
 		else:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True, 
-				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_emb= feeder.eval_spk_emb,
-				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc)
+				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb,
+				ref_type=feeder.ref_type, ref_mel=feeder.ref_mel, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+				use_intercross=args.intercross)
 		model.add_loss()
 		return model
 
@@ -154,7 +158,7 @@ def train(log_dir, args, hparams):
 	#Set up data feeder
 	coord = tf.train.Coordinator()
 	with tf.variable_scope('datafeeder') as scope:
-		feeder = Feeder(coord, input_path, hparams)
+		feeder = Feeder(coord, input_path, hparams, args)
 
 	#Set up model:
 	global_step = tf.Variable(0, name='global_step', trainable=False)

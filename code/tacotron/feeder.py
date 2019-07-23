@@ -5,6 +5,13 @@ import traceback
 
 import numpy as np
 import tensorflow as tf
+import pandas as pd
+
+if __name__ == '__main__':
+	import sys
+	sys.path.append(os.getcwd())
+	import argparse
+
 from infolog import log
 from sklearn.model_selection import train_test_split
 from tacotron.utils.text import text_to_sequence
@@ -19,18 +26,16 @@ class Feeder:
 		Feeds batches of data into queue on a background thread.
 	"""
 
-	def __init__(self, coordinator, metadata_filename, hparams):
+	def __init__(self, coordinator, metadata_filename, hparams, args):
 		super(Feeder, self).__init__()
 		self._coord = coordinator
 		self._hparams = hparams
 		self._cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		self._train_offset = 0
 		self._test_offset = 0
+		self._args = args
 
 		# Load metadata
-		# dataset_name = os.path.basename(metadata_filename).split('_')[1]
-		# data_folder = os.path.dirname(metadata_filename)
-		# dataset_folder = os.path.join(data_folder,dataset_name)
 		dataset_folder = os.path.dirname(metadata_filename)
 
 		self._mel_dir = os.path.join(dataset_folder, 'mels')
@@ -42,6 +47,13 @@ class Feeder:
 			frame_shift_ms = hparams.hop_size / hparams.sample_rate
 			hours = sum([int(x[5]) for x in self._metadata]) * frame_shift_ms / (3600)
 			log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
+
+		#load metadata into a dataframe
+		columns = ['audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text', 'emt_label', 'spk_label', 'basename']
+		self._metadata_df = pd.read_csv(metadata_filename, sep='|')
+		if len(self._metadata_df.columns) == 11:
+			columns += ['sex']
+		self._metadata_df.columns = columns
 
 		#Train test split
 		if hparams.tacotron_test_size is None:
@@ -59,6 +71,9 @@ class Feeder:
 
 		self._train_meta = list(np.array(self._metadata)[train_indices])
 		self._test_meta = list(np.array(self._metadata)[test_indices])
+
+		self._metadata_df['train_test'] = 'train'
+		self._metadata_df.iloc[np.array(sorted(test_indices))-1,-1] = 'test'
 
 		self.test_steps = len(self._test_meta) // hparams.tacotron_batch_size
 
@@ -90,12 +105,15 @@ class Feeder:
       tf.placeholder(tf.int32, shape=(None,), name='emt_labels'),
       tf.placeholder(tf.int32, shape=(None,), name='spk_labels'),
 			tf.placeholder(tf.float32, shape=(None, hparams.tacotron_num_gpus*hparams.tacotron_spk_emb_dim), name='spk_emb'),
+			tf.placeholder(tf.int32, shape=(None,), name='ref_type'),
+			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel')
 			]
 
 			# Create queue for buffering data
-			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32], name='input_queue')
+			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32, tf.int32, tf.float32], name='input_queue')
 			self._enqueue_op = queue.enqueue(self._placeholders)
-			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths, self.split_infos, self.emt_labels, self.spk_labels, self.spk_emb = queue.dequeue()
+			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths,\
+				self.split_infos, self.emt_labels, self.spk_labels, self.spk_emb, self.ref_type, self.ref_mel = queue.dequeue()
 
 			self.inputs.set_shape(self._placeholders[0].shape)
 			self.input_lengths.set_shape(self._placeholders[1].shape)
@@ -107,13 +125,15 @@ class Feeder:
 			self.emt_labels.set_shape(self._placeholders[7].shape)
 			self.spk_labels.set_shape(self._placeholders[8].shape)
 			self.spk_emb.set_shape(self._placeholders[9].shape)
+			self.ref_type.set_shape(self._placeholders[10].shape)
+			self.ref_mel.set_shape(self._placeholders[11].shape)
 
 			# Create eval queue for buffering eval data
-			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32], name='eval_queue')
+			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32, tf.int32, tf.float32], name='eval_queue')
 			self._eval_enqueue_op = eval_queue.enqueue(self._placeholders)
 			self.eval_inputs, self.eval_input_lengths, self.eval_mel_targets, self.eval_token_targets, \
 				self.eval_linear_targets, self.eval_targets_lengths, self.eval_split_infos, self.eval_emt_labels,\
-				self.eval_spk_labels, self.eval_spk_emb  = eval_queue.dequeue()
+				self.eval_spk_labels, self.eval_spk_emb, self.eval_ref_type, self.eval_ref_mel = eval_queue.dequeue()
 
 			self.eval_inputs.set_shape(self._placeholders[0].shape)
 			self.eval_input_lengths.set_shape(self._placeholders[1].shape)
@@ -125,6 +145,8 @@ class Feeder:
 			self.eval_emt_labels.set_shape(self._placeholders[7].shape)
 			self.eval_spk_labels.set_shape(self._placeholders[8].shape)
 			self.eval_spk_emb.set_shape(self._placeholders[9].shape)
+			self.eval_ref_type.set_shape(self._placeholders[10].shape)
+			self.eval_ref_mel.set_shape(self._placeholders[11].shape)
 
 	def start_threads(self, session):
 		self._session = session
@@ -138,6 +160,7 @@ class Feeder:
 
 	def _get_test_groups(self):
 		meta = self._test_meta[self._test_offset]
+		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'test']
 		self._test_offset += 1
 
 		text = meta[6]
@@ -149,9 +172,36 @@ class Feeder:
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+
+		#check for speaker embedding
+		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		if os.path.exists(spk_emb_path):
+			spk_emb = np.load(spk_emb_path)
+		else:
+			spk_emb = np.zeros(hparams.tacotron_spk_emb_dim)
 		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
-		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
+
+		#ref type 0 = use same mel as reference for both emt and spk (i.e. ref_mel won't be used)
+		ref_type = 0
+		ref_mel = np.zeros((1,80))
+
+		if self._args.intercross:
+			if True:#np.random.choice(['emt','spk']) == 'emt':
+				ref_type = 1 #ref type 1 = change emt
+				#find all mels with same emotion type
+				df_meta_same_style = df_meta[df_meta.loc[:,'emt_label'] == int(emt_label)]
+
+			else:
+				ref_type = 2 #ref type 2 = change spk
+				# find all mels with same spk type
+				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
+
+			#select one mel from same style to use as reference
+			idx = np.random.choice(df_meta_same_style.index)
+			mel_name = df_meta_same_style.loc[idx,'mel_filename']
+			ref_mel = np.load(os.path.join(self._mel_dir, mel_name))
+
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_type, ref_mel, len(mel_target))
 
 	def make_test_batches(self):
 		start = time.time()
@@ -208,6 +258,8 @@ class Feeder:
 		meta = self._train_meta[self._train_offset]
 		self._train_offset += 1
 
+		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'train']
+
 		text = meta[6]
 		emt_label = meta[7]
 		spk_label = meta[8]
@@ -217,9 +269,36 @@ class Feeder:
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
 		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
-		spk_emb = np.load(os.path.join(self._spk_emb_dir, meta[3]))
+
+		#check for speaker embedding
+		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		if os.path.exists(spk_emb_path):
+			spk_emb = np.load(spk_emb_path)
+		else:
+			spk_emb = np.zeros(hparams.tacotron_spk_emb_dim)
 		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
-		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, len(mel_target))
+
+		# ref type 0 = use same mel as reference for both emt and spk (i.e. ref_mel won't be used)
+		ref_type = 0
+		ref_mel = np.zeros((1,80))
+
+		if self._args.intercross:
+			if True:#np.random.choice(['emt', 'spk']) == 'emt':
+				ref_type = 1  # ref type 1 = change emt
+				# find all mels with same emotion type
+				df_meta_same_style = df_meta[df_meta.loc[:, 'emt_label'] == int(emt_label)]
+
+			else:
+				ref_type = 2  # ref type 2 = change spk
+				# find all mels with same spk type
+				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
+
+			# select one mel from same style to use as reference
+			idx = np.random.choice(df_meta_same_style.index)
+			mel_name = df_meta_same_style.loc[idx, 'mel_filename']
+			ref_mel = np.load(os.path.join(self._mel_dir, mel_name))
+
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_type, ref_mel, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):
 		assert 0 == len(batches) % self._hparams.tacotron_num_gpus
@@ -232,10 +311,12 @@ class Feeder:
 		linear_targets = None
 		spk_embs = None
 		split_infos = []
+		mel_refs = None
 
 		targets_lengths = np.asarray([x[-1] for x in batches], dtype=np.int32) #Used to mask loss
-		spk_labels = np.asarray([x[-2] for x in batches], dtype=np.int32)
-		emt_labels = np.asarray([x[-3] for x in batches], dtype = np.int32)
+		ref_types = np.asarray([x[-3] for x in batches], dtype=np.int32)
+		spk_labels = np.asarray([x[-4] for x in batches], dtype=np.int32)
+		emt_labels = np.asarray([x[-5] for x in batches], dtype = np.int32)
 		input_lengths = np.asarray([len(x[0]) for x in batches], dtype=np.int32)
 
 		#Produce inputs/targets of variables lengths for different GPUs
@@ -255,12 +336,15 @@ class Feeder:
 
 			spk_emb_cur_device = np.stack([x[4] for x in batch])
 			spk_embs = np.concatenate((spk_embs, spk_emb_cur_device), axis=1) if spk_embs is not None else spk_emb_cur_device
-			# print("mel",mel_targets.shape)
 
-			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len, hparams.tacotron_spk_emb_dim])
+			mel_refs_cur_device, mel_refs_max_len = self._prepare_targets([x[-2] for x in batch], outputs_per_step)
+			mel_refs = np.concatenate(( mel_refs, mel_refs_cur_device), axis=1) if mel_refs is not None else mel_refs_cur_device
+
+			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len, hparams.tacotron_spk_emb_dim, mel_refs_max_len])
+
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
-		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels, spk_embs)
+		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels, spk_embs, ref_types, mel_refs)
 
 	def _prepare_inputs(self, inputs):
 		max_len = max([len(x) for x in inputs])
@@ -299,18 +383,23 @@ def test():
 	_batches_per_group = 2
 	test_size = 64
 
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
+	args = parser.parse_args()
+
 	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/emt4/train.txt'
 	coord = tf.train.Coordinator()
-	feeder = Feeder(coord, metadata_filename, hparams)
+	feeder = Feeder(coord, metadata_filename, hparams, args)
 
 	with tf.Session() as sess:
 		sess.run(tf.global_variables_initializer())
 		feeder.start_threads(sess)
 		vars = [feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, feeder.linear_targets,
-						feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.spk_emb]
+						feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.spk_emb,
+						feeder.ref_type, feeder.ref_mel]
 		outputs = sess.run(vars)
 		(inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels,
-		 	pk_labels, spk_emb) = outputs
+		 	pk_labels, spk_emb, ref_type, ref_mel) = outputs
 
 		print("mel_targets", len(mel_targets), mel_targets[0].shape)
 		print("linear_targets", len(linear_targets), linear_targets[0].shape)
@@ -322,6 +411,8 @@ def test():
 		print("emt_labels", input_lengths.shape)
 		print("spk_labels", input_lengths.shape)
 		print("split_infos", split_infos.shape)
+		print("ref_type", ref_type.shape)
+		print("ref_mel", ref_mel.shape)
 
 if __name__ == '__main__':
 	test()
