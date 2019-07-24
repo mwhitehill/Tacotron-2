@@ -8,3 +8,5 @@ logs-Tacotron-2
 logs
 .viminfo
 archive
+.gitconfig
+eval

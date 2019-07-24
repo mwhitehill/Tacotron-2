@@ -21,6 +21,17 @@ _batches_per_group = 64
 test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
 			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 
+def get_metadata_df(path):
+
+	# load metadata into a dataframe
+	columns = ['audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
+						 'emt_label', 'spk_label', 'basename']
+	meta_df = pd.read_csv(path, sep='|')
+	if len(meta_df.columns) == 11:
+		columns += ['sex']
+	meta_df.columns = columns
+	return(meta_df)
+
 class Feeder:
 	"""
 		Feeds batches of data into queue on a background thread.
@@ -48,12 +59,7 @@ class Feeder:
 			hours = sum([int(x[5]) for x in self._metadata]) * frame_shift_ms / (3600)
 			log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
 
-		#load metadata into a dataframe
-		columns = ['audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text', 'emt_label', 'spk_label', 'basename']
-		self._metadata_df = pd.read_csv(metadata_filename, sep='|')
-		if len(self._metadata_df.columns) == 11:
-			columns += ['sex']
-		self._metadata_df.columns = columns
+		self._metadata_df = get_metadata_df(metadata_filename)
 
 		#Train test split
 		if hparams.tacotron_test_size is None:

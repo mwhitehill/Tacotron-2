@@ -23,12 +23,16 @@ class Synthesizer:
 		input_lengths = tf.placeholder(tf.int32, (None), name='input_lengths')
 		targets = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_targets')
 		split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos')
+
+		ref_types = tf.placeholder(tf.int32, (None), name='ref_types')
+		mel_refs = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs')
+
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
-				self.model.initialize(inputs, input_lengths, targets, gta=gta, split_infos=split_infos)
+				self.model.initialize(inputs, input_lengths, targets,gta=gta, split_infos=split_infos, ref_type=ref_types, ref_mel=mel_refs)
 			else:
-				self.model.initialize(inputs, input_lengths, split_infos=split_infos)
+				self.model.initialize(inputs, input_lengths, split_infos=split_infos, ref_type=ref_types, ref_mel=mel_refs)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -59,6 +63,9 @@ class Synthesizer:
 		self.targets = targets
 		self.split_infos = split_infos
 
+		self.ref_types = ref_types
+		self.mel_refs = mel_refs
+
 		log('Loading checkpoint: %s' % checkpoint_path)
 		#Memory allocation on the GPUs as needed
 		config = tf.ConfigProto()
@@ -72,7 +79,8 @@ class Synthesizer:
 		saver.restore(self.session, checkpoint_path)
 
 
-	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames):
+	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, ref_types=None,mel_ref_filenames=None,
+								 basenames_refs=None):
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -82,27 +90,41 @@ class Synthesizer:
 		while len(texts) % hparams.tacotron_synthesis_batch_size != 0:
 			texts.append(texts[-1])
 			basenames.append(basenames[-1])
+			ref_types.append(ref_types[-1])
 			if mel_filenames is not None:
 				mel_filenames.append(mel_filenames[-1])
+			if mel_ref_filenames is not None:
+				mel_ref_filenames.append(mel_ref_filenames[-1])
 
 		assert 0 == len(texts) % self._hparams.tacotron_num_gpus
 		seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
 		input_lengths = [len(seq) for seq in seqs]
-
 		size_per_device = len(seqs) // self._hparams.tacotron_num_gpus
 
 		#Pad inputs according to each GPU max length
 		input_seqs = None
 		split_infos = []
+
+		np_mel_refs = [np.load(f) for f in mel_ref_filenames]
+		mel_ref_lengths = [len(f) for f in np_mel_refs]
+		mel_ref_seqs = None
+
 		for i in range(self._hparams.tacotron_num_gpus):
 			device_input = seqs[size_per_device*i: size_per_device*(i+1)]
 			device_input, max_seq_len = self._prepare_inputs(device_input)
+
 			input_seqs = np.concatenate((input_seqs, device_input), axis=1) if input_seqs is not None else device_input
-			split_infos.append([max_seq_len, 0, 0, 0])
+
+			device_mel_ref = np_mel_refs[size_per_device * i: size_per_device * (i + 1)]
+			device_mel_ref, max_mel_ref_len = self._prepare_targets(device_mel_ref, self._hparams.outputs_per_step)
+			mel_ref_seqs = np.concatenate((mel_ref_seqs, device_mel_ref), axis=1) if mel_ref_seqs is not None else device_mel_ref
+
+			split_infos.append([max_seq_len, 0, 0, 0, 0, max_mel_ref_len])
 
 		feed_dict = {
 			self.inputs: input_seqs,
 			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
+			self.ref_types: np.asarray(ref_types, dtype=np.int32)
 		}
 
 		if self.gta:
@@ -158,7 +180,7 @@ class Synthesizer:
 			linears = np.clip(linears, T2_output_range[0], T2_output_range[1])
 			assert len(mels) == len(linears) == len(texts)
 
-		mels = np.clip(mels, T2_output_range[0], T2_output_range[1])
+		mels = [np.clip(m, T2_output_range[0], T2_output_range[1]) for m in mels]
 
 		if basenames is None:
 			#Generate wav and read it
@@ -197,25 +219,27 @@ class Synthesizer:
 
 			# Write the spectrogram to disk
 			# Note: outputs mel-spectrogram files and target ones have same names, just different folders
-			mel_filename = os.path.join(out_dir, 'mel-{}.npy'.format(basenames[i]))
+			mel_filename = os.path.join(out_dir, 'mel-{}_{}.npy'.format(basenames[i],basenames_refs[i]))
 			np.save(mel_filename, mel, allow_pickle=False)
 			saved_mels_paths.append(mel_filename)
 
 			if log_dir is not None:
+				os.makedirs(os.path.join(log_dir,'wavs'),exist_ok=True)
+				os.makedirs(os.path.join(log_dir, 'plots'),exist_ok=True)
 				#save wav (mel -> wav)
 				if hparams.GL_on_GPU:
 					wav = self.session.run(self.GLGPU_mel_outputs, feed_dict={self.GLGPU_mel_inputs: mel})
 					wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
 				else:
 					wav = audio.inv_mel_spectrogram(mel.T, hparams)
-				audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-mel.wav'.format(basenames[i])), sr=hparams.sample_rate)
+				audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-mel_{}.wav'.format(basenames[i],basenames_refs[i])), sr=hparams.sample_rate)
 
 				#save alignments
-				plot.plot_alignment(alignments[i], os.path.join(log_dir, 'plots/alignment-{}.png'.format(basenames[i])),
+				plot.plot_alignment(alignments[i], os.path.join(log_dir, 'plots/alignment-{}_{}.png'.format(basenames[i],basenames_refs[i])),
 					title='{}'.format(texts[i]), split_title=True, max_len=target_lengths[i])
 
 				#save mel spectrogram plot
-				plot.plot_spectrogram(mel, os.path.join(log_dir, 'plots/mel-{}.png'.format(basenames[i])),
+				plot.plot_spectrogram(mel, os.path.join(log_dir, 'plots/mel-{}_{}.png'.format(basenames[i],basenames_refs[i])),
 					title='{}'.format(texts[i]), split_title=True)
 
 				if hparams.predict_linear:
@@ -225,10 +249,10 @@ class Synthesizer:
 						wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
 					else:
 						wav = audio.inv_linear_spectrogram(linears[i].T, hparams)
-					audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-linear.wav'.format(basenames[i])), sr=hparams.sample_rate)
+					audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-linear_{}.wav'.format(basenames[i],basenames_refs[i])), sr=hparams.sample_rate)
 
 					#save linear spectrogram plot
-					plot.plot_spectrogram(linears[i], os.path.join(log_dir, 'plots/linear-{}.png'.format(basenames[i])),
+					plot.plot_spectrogram(linears[i], os.path.join(log_dir, 'plots/linear-{}_{}.png'.format(basenames[i],basenames_refs[i])),
 						title='{}'.format(texts[i]), split_title=True, auto_aspect=True)
 
 		return saved_mels_paths, speaker_ids

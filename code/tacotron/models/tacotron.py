@@ -72,9 +72,9 @@ class Tacotron():
 
 			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
-			tower_emt_labels = tf.to_float(tf.split(emt_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0))
-			tower_spk_labels = tf.to_float(tf.split(spk_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0))
-			tower_ref_type = tf.to_float(tf.split(ref_type, num_or_size_splits=hp.tacotron_num_gpus, axis=0))
+			tower_emt_labels = tf.to_float(tf.split(emt_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0)) if emt_labels is not None else emt_labels
+			tower_spk_labels = tf.to_float(tf.split(spk_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0))if spk_labels is not None else spk_labels
+			tower_ref_type = tf.to_float(tf.split(ref_type, num_or_size_splits=hp.tacotron_num_gpus, axis=0))if ref_type is not None else ref_type
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
 			p_spk_emb = tf.py_func(split_func, [spk_emb, split_infos[:, 4]], lout_float) if spk_emb is not None else spk_emb
@@ -96,7 +96,8 @@ class Tacotron():
 			linear_channels = hp.num_freq
 			for i in range (hp.tacotron_num_gpus):
 				tower_inputs.append(tf.reshape(p_inputs[i], [batch_size, -1]))
-				tower_spk_emb.append(tf.reshape(p_spk_emb[i], [-1, self._hparams.tacotron_spk_emb_dim]))
+				if p_spk_emb is not None:
+					tower_spk_emb.append(tf.reshape(p_spk_emb[i], [-1, self._hparams.tacotron_spk_emb_dim]))
 				if p_mel_targets is not None:
 					tower_mel_targets.append(tf.reshape(p_mel_targets[i], [batch_size, -1, mel_channels]))
 				if p_stop_token_targets is not None:
@@ -236,8 +237,12 @@ class Tacotron():
 					max_iters = hp.max_iters if not (is_training or is_evaluating) else None
 
 					#Decode
-					(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(
-						CustomDecoder(decoder_cell, self.helper, decoder_init_state, tower_spk_emb[i], tower_emt_labels[i]),
+					if use_emt_disc and use_spk_disc:
+						custom_decoder = CustomDecoder(decoder_cell, self.helper, decoder_init_state, tower_spk_emb[i], tower_emt_labels[i])
+					else:
+						custom_decoder = CustomDecoder(decoder_cell, self.helper, decoder_init_state)
+
+					(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(custom_decoder,
 						impute_finished=False,
 						maximum_iterations=max_iters,
 						swap_memory=hp.tacotron_swap_with_cpu)

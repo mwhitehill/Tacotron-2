@@ -27,7 +27,7 @@ class CustomDecoder(decoder.Decoder):
 	Only use this decoder with Tacotron 2 as it only accepts tacotron custom helpers
 	"""
 
-	def __init__(self, cell, helper, initial_state, spk_emb, emt_label, output_layer=None):
+	def __init__(self, cell, helper, initial_state, spk_emb=None, emt_label=None, output_layer=None):
 		"""Initialize CustomDecoder.
 		Args:
 			cell: An `RNNCell` instance.
@@ -117,7 +117,10 @@ class CustomDecoder(decoder.Decoder):
 		"""
 		with ops.name_scope(name, "CustomDecoderStep", (time, inputs, state)):
 			#Call outputprojection wrapper cell
-			(cell_outputs, stop_token), cell_state = self._cell(inputs, state, self._spk_emb, self._emt_label)
+			if self._spk_emb is not None and self._emt_label is not None:
+				(cell_outputs, stop_token), cell_state = self._cell(inputs, state, self._spk_emb, self._emt_label)
+			else:
+				(cell_outputs, stop_token), cell_state = self._cell(inputs, state)
 
 			#apply output_layer (if existant)
 			if self._output_layer is not None:

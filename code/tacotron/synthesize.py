@@ -3,12 +3,19 @@ import os
 import re
 import time
 from time import sleep
-
+import numpy as np
 import tensorflow as tf
+
+if __name__ == '__main__':
+	import sys
+	sys.path.append(os.getcwd())
+	import argparse
+
 from hparams import hparams, hparams_debug_string
 from infolog import log
 from tacotron.synthesizer import Synthesizer
 from tqdm import tqdm
+from tacotron.feeder import get_metadata_df
 
 
 def generate_fast(model, text):
@@ -71,6 +78,115 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 	log('synthesized mel spectrograms at {}'.format(eval_dir))
 	return eval_dir
 
+def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
+	GTA = (args.GTA == 'True')
+	if GTA:
+		synth_dir = os.path.join(output_dir, 'gta')
+
+		#Create output path if it doesn't exist
+		os.makedirs(synth_dir, exist_ok=True)
+	else:
+		synth_dir = os.path.join(output_dir, 'natural')
+
+		#Create output path if it doesn't exist
+		os.makedirs(synth_dir, exist_ok=True)
+
+
+	metadata_filename = '../eval/eval_emt4.txt'
+	log(hparams_debug_string())
+	synth = Synthesizer()
+	synth.load(checkpoint_path, hparams, gta=GTA)
+	with open(metadata_filename, encoding='utf-8') as f:
+		metadata = [line.strip().split('|') for line in f]
+		frame_shift_ms = hparams.hop_size / hparams.sample_rate
+		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
+		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
+
+	log('Starting Synthesis')
+	mel_dir = os.path.join(args.input_dir, 'mels')
+	wav_dir = os.path.join(args.input_dir, 'audio')
+	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
+		texts = [m[5] for m in metadata]
+		mel_filenames = [os.path.join(mel_dir, m[1]) for m in metadata]
+		wav_filenames = [os.path.join(wav_dir, m[0]) for m in metadata]
+		basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
+		basenames_refs = [m[10] for m in metadata]
+		mel_ref_filenames = [os.path.join(mel_dir, m[11]) for m in metadata]
+		ref_types = np.ones(len(mel_filenames),dtype=int) * 1
+		mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
+																												 ref_types=ref_types,mel_ref_filenames=mel_ref_filenames,
+																												 basenames_refs=basenames_refs)
+
+		for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
+			file.write('|'.join([str(x) for x in elems]) + '\n')
+	log('synthesized mel spectrograms at {}'.format(synth_dir))
+	return os.path.join(synth_dir, 'map.txt')
+
+
+# def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
+# 	GTA = (args.GTA == 'True')
+# 	if GTA:
+# 		synth_dir = os.path.join(output_dir, 'gta')
+#
+# 		#Create output path if it doesn't exist
+# 		os.makedirs(synth_dir, exist_ok=True)
+# 	else:
+# 		synth_dir = os.path.join(output_dir, 'natural')
+#
+# 		#Create output path if it doesn't exist
+# 		os.makedirs(synth_dir, exist_ok=True)
+#
+#
+# 	metadata_filename = os.path.join(args.input_dir, 'train.txt')
+# 	log(hparams_debug_string())
+# 	synth = Synthesizer()
+# 	synth.load(checkpoint_path, hparams, gta=GTA)
+# 	with open(metadata_filename, encoding='utf-8') as f:
+# 		metadata = [line.strip().split('|') for line in f]
+# 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
+# 		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
+# 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
+#
+# 	meta_df_all = get_metadata_df(metadata_filename)
+#
+# 	#Set inputs batch wise
+# 	metadata = [metadata[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
+# 	meta_df_list = [meta_df_all.iloc[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
+#
+# 	metadata = metadata[:5]
+# 	metadata_df = metadata_df[:5]
+#
+# 	log('Starting Synthesis')
+# 	mel_dir = os.path.join(args.input_dir, 'mels')
+# 	wav_dir = os.path.join(args.input_dir, 'audio')
+# 	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
+# 		for i, (meta,meta_df) in enumerate(tqdm(zip(metadata,meta_df_list))):
+# 			texts = [m[5] for m in meta]
+# 			mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
+# 			wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
+# 			basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
+#
+# 			mel_ref_filenames = []
+# 			# if args.synth_style_type == 'emt':
+# 			labels = meta_df.loc[:, 'emt_labels']
+#
+# 			for l in labels:
+# 				idx = np.random.choice(meta_df_all[meta_df_all.loc[:,'emt_labels'] == l].index)
+# 				mel_ref_filenames.append(meta_df_all.iloc[idx,'mel_filename'].object.value)
+# 			print(mel_ref_filenames)
+#
+# 	# 		# elif args.synth_style_type == 'spk':
+# 	# 		# 	labels = meta_df.loc[:, 'spk_labels']
+# 	# 		#
+# 	# 		# else:
+# 	#
+# 	# 		mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, None, mel_filenames)
+# 	#
+# 	# 		for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
+# 	# 			file.write('|'.join([str(x) for x in elems]) + '\n')
+# 	# log('synthesized mel spectrograms at {}'.format(synth_dir))
+# 	# return os.path.join(synth_dir, 'map.txt')
+
 def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	GTA = (args.GTA == 'True')
 	if GTA:
@@ -115,7 +231,8 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	return os.path.join(synth_dir, 'map.txt')
 
 def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
-	output_dir = 'tacotron_' + args.output_dir
+	# output_dir = 'tacotron_' + args.output_dir
+	output_dir = args.output_dir
 
 	try:
 		checkpoint_path = tf.train.get_checkpoint_state(checkpoint).model_checkpoint_path
@@ -134,6 +251,33 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 	if args.mode == 'eval':
 		return run_eval(args, checkpoint_path, output_dir, hparams, sentences)
 	elif args.mode == 'synthesis':
-		return run_synthesis(args, checkpoint_path, output_dir, hparams)
+		# return run_synthesis(args, checkpoint_path, output_dir, hparams)
+		return run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams)
 	else:
 		run_live(args, checkpoint_path, hparams)
+
+def test():
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--input_dir', default='training_data', help='folder to contain inputs sentences/targets')
+	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
+	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
+	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
+	parser.add_argument('--synth_style_type', default=None, help='vary the emotion, speaker id, or neither')
+	parser.add_argument('--checkpoint', default=None, help='vary the emotion, speaker id, or neither')
+	args = parser.parse_args()
+
+
+	#set manually
+	args.input_dir = r'../data/emt4'
+	args.output_dir = r'../eval/emt4'
+	args.synth_style_type='emt'
+	args.checkpoint = r'../logs-Tacotron-2/taco_pretrained'
+
+
+	tacotron_synthesize(args, hparams, args.checkpoint)
+
+
+if __name__ == '__main__':
+
+	test()
