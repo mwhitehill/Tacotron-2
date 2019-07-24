@@ -34,13 +34,18 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 
 	df_metadata_path = os.path.join(folder_data, 'metadata_{}.txt'.format(args.dataset))
 	with open(df_metadata_path, encoding='utf-8') as f:
+		spk_ids = [line.strip().split('|')[3] for line in f]
+
+	spk_ids = sorted(list(frozenset(spk_ids)))
+
+	with open(df_metadata_path, encoding='utf-8') as f:
 		for line in f:
 			parts = line.strip().split('|')
 			path = parts[0]
 			audio_path = os.path.join(in_dir, path)
 			text = parts[1]
 			emt_label = parts[2]
-			spk_label = parts[3]
+			spk_label = spk_ids.index(parts[3])+1 #reserving emt4 as spk label 0
 			sex = parts[4]
 			if args.philly:
 				futures.append(_process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams))
