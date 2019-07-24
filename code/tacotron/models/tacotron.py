@@ -30,7 +30,7 @@ class Tacotron():
 
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None,
 								 targets_lengths=None, gta=False,global_step=None, is_training=False, is_evaluating=False,
-								 split_infos=None, emt_labels=None, spk_labels=None, spk_emb=None, ref_type = None, ref_mel = None,
+								 split_infos=None, emt_labels=None, spk_labels=None, spk_emb=None, ref_mel_emt = None, ref_mel_spk = None,
 								 use_emt_disc = False, use_spk_disc = False, use_intercross=False):
 		"""
 		Initializes the model for inference
@@ -74,7 +74,6 @@ class Tacotron():
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
 			tower_emt_labels = tf.to_float(tf.split(emt_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0)) if emt_labels is not None else emt_labels
 			tower_spk_labels = tf.to_float(tf.split(spk_labels, num_or_size_splits=hp.tacotron_num_gpus, axis=0))if spk_labels is not None else spk_labels
-			tower_ref_type = tf.to_float(tf.split(ref_type, num_or_size_splits=hp.tacotron_num_gpus, axis=0))if ref_type is not None else ref_type
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
 			p_spk_emb = tf.py_func(split_func, [spk_emb, split_infos[:, 4]], lout_float) if spk_emb is not None else spk_emb
@@ -82,14 +81,16 @@ class Tacotron():
 			p_stop_token_targets = tf.py_func(split_func, [stop_token_targets, split_infos[:,2]], lout_float) if stop_token_targets is not None else stop_token_targets
 			p_linear_targets = tf.py_func(split_func, [linear_targets, split_infos[:,3]], lout_float) if linear_targets is not None else linear_targets
 
-			p_ref_mel = tf.py_func(split_func, [ref_mel, split_infos[:,5]], lout_float) if ref_mel is not None else ref_mel
+			p_ref_mel_emt = tf.py_func(split_func, [ref_mel_emt, split_infos[:,5]], lout_float) if ref_mel_emt is not None else ref_mel_emt
+			p_ref_mel_spk = tf.py_func(split_func, [ref_mel_spk, split_infos[:, 6]],lout_float) if ref_mel_spk is not None else ref_mel_spk
 
 			tower_inputs = []
 			tower_mel_targets = []
 			tower_stop_token_targets = []
 			tower_linear_targets = []
 			tower_spk_emb = []
-			tower_ref_mel = []
+			tower_ref_mel_emt = []
+			tower_ref_mel_spk = []
 
 			batch_size = tf.shape(inputs)[0]
 			mel_channels = hp.num_mels
@@ -104,8 +105,10 @@ class Tacotron():
 					tower_stop_token_targets.append(tf.reshape(p_stop_token_targets[i], [batch_size, -1]))
 				if p_linear_targets is not None:
 					tower_linear_targets.append(tf.reshape(p_linear_targets[i], [batch_size, -1, linear_channels]))
-				if p_ref_mel is not None:
-					tower_ref_mel.append(tf.reshape(p_ref_mel[i], [batch_size, -1, mel_channels]))
+				if p_ref_mel_emt is not None:
+					tower_ref_mel_emt.append(tf.reshape(p_ref_mel_emt[i], [batch_size, -1, mel_channels]))
+				if p_ref_mel_spk is not None:
+					tower_ref_mel_spk.append(tf.reshape(p_ref_mel_spk[i], [batch_size, -1, mel_channels]))
 
 		T2_output_range = (-hp.max_abs_value, hp.max_abs_value) if hp.symmetric_mels else (0, hp.max_abs_value)
 
@@ -157,46 +160,80 @@ class Tacotron():
 					#For shape visualization purpose
 					enc_conv_output_shape = encoder_cell.conv_output_shape
 
-					# if tower_ref_type[i][0] > 0 and ref_mel is not None:
-					# Reference encoder
-					refnet_outputs = reference_encoder(
-						tower_ref_mel[i],
-						filters=hp.reference_filters,
-						kernel_size=(3, 3),
-						strides=(2, 2),
-						encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
-						is_training=is_training)  # [N, 128]
-					# self.refnet_outputs = refnet_outputs
+					if tower_ref_mel_emt is not None and tower_ref_mel_spk is not None:
+						# Reference encoder
+						refnet_outputs_emt = reference_encoder(
+							tower_ref_mel_emt[i],
+							filters=hp.reference_filters,
+							kernel_size=(3, 3),
+							strides=(2, 2),
+							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
+							is_training=is_training)  # [N, 128]
 
-					if hp.use_gst:
-						# Style attention
-						style_attention = MultiheadAttention(
-							tf.expand_dims(refnet_outputs, axis=1),  # [N, 1, 128]
-							tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])), # [N, hp.num_gst, 256/hp.num_heads]
-							num_heads=hp.num_heads,
-							num_units=hp.style_att_dim,
-							attention_type=hp.style_att_type)
+						refnet_outputs_spk = reference_encoder(
+							tower_ref_mel_spk[i],
+							filters=hp.reference_filters,
+							kernel_size=(3, 3),
+							strides=(2, 2),
+							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
+							is_training=is_training)  # [N, 128]
 
-						style_embeddings = style_attention.multi_head_attention()
+						if hp.use_gst:
+							# Style attention
+							style_attention_emt = MultiheadAttention(
+								tf.expand_dims(refnet_outputs_emt, axis=1),  # [N, 1, 128]
+								tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])), # [N, hp.num_gst, 256/hp.num_heads]
+								num_heads=hp.num_heads,
+								num_units=hp.style_att_dim,
+								attention_type=hp.style_att_type)
+
+							style_embeddings_emt = style_attention_emt.multi_head_attention()
+
+							style_attention_spk = MultiheadAttention(
+								tf.expand_dims(refnet_outputs_spk, axis=1),  # [N, 1, 128]
+								tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])), # [N, hp.num_gst, 256/hp.num_heads]
+								num_heads=hp.num_heads,
+								num_units=hp.style_att_dim,
+								attention_type=hp.style_att_type)
+							style_embeddings_spk = style_attention_emt.multi_head_attention()
+
+						else:
+							style_embeddings_emt = tf.expand_dims(refnet_outputs_emt, axis=1)  # [N, 1, 128]
+							style_embeddings_spk = tf.expand_dims(refnet_outputs_spk, axis=1)  # [N, 1, 128]
+
+						style_embeddings = tf.concat([style_embeddings_emt, style_embeddings_spk], axis=-1)
+
+					#no reference mel spec provided so just use random
 					else:
-						style_embeddings = tf.expand_dims(refnet_outputs, axis=1)  # [N, 1, 128]
-					# else:
-					# 	print("Use random weight for GST.")
-					# 	random_weights = tf.random_uniform([hp.num_heads, hp.num_gst], maxval=1.0, dtype=tf.float32)
-					# 	random_weights = tf.nn.softmax(random_weights, name="random_weights")
-					# 	style_embeddings = tf.matmul(random_weights, tf.nn.tanh(gst_tokens))
-					# 	style_embeddings = tf.reshape(style_embeddings,
-					# 																[1, 1] + [hp.num_heads * gst_tokens.get_shape().as_list()[1]])
+						print("Use random weight for GST.")
+						random_weights = tf.random_uniform([hp.num_heads, hp.num_gst], maxval=1.0, dtype=tf.float32)
+						random_weights = tf.nn.softmax(random_weights, name="random_weights")
+						style_embeddings = tf.matmul(random_weights, tf.nn.tanh(gst_tokens))
+						style_embeddings = tf.reshape(style_embeddings,
+																					[1, 1] + [hp.num_heads * gst_tokens.get_shape().as_list()[1]])
 
-					# Extend style embeddings to be compatible with encoder_outputs.
-					# Make encoder_output's dimensions by concatenating style embeddings with a vector of all zeroes.
-					# Preserves effect of both style and encoder_outputs.
-					neg = tf.add(style_embeddings, tf.negative(style_embeddings))
-					style_embeddings = tf.concat([style_embeddings, neg], axis=-1)
+					#just simply concatenate the style embeddings to encoder embeddings
+					if hp.tacotron_se_concat:
+						# Add style embedding to every text encoder state
+						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
+						encoder_outputs = tf.concat([encoder_outputs, style_embeddings],axis=-1)
 
-					# Add style embedding to every text encoder state
-					style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
-					encoder_outputs = tf.add(encoder_outputs, style_embeddings)
+					else:
+						# Extend style embeddings to be compatible with encoder_outputs.
+						# Make encoder_output's dimensions by concatenating style embeddings with a vector of all zeroes.
+						# Preserves effect of both style and encoder_outputs.
+						# Skip if the shapes already match (should match if using 2 style embeddings)
+						if shape_list(style_embeddings)[-1] != shape_list(encoder_outputs)[-1]:
+							neg = tf.add(style_embeddings, tf.negative(style_embeddings))
+							style_embeddings = tf.concat([style_embeddings, neg], axis=-1)
+
+						# Add style embedding to every text encoder state
+						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
+						encoder_outputs = tf.add(encoder_outputs, style_embeddings)
+
+				if hp.tacotron_style_emb_disc:
+					self.style_emb_logit_emt = Style_Emb_Disc(style_embeddings_emt, 4)
+					self.style_emb_logit_spk = Style_Emb_Disc(style_embeddings_spk, )
 
 				#Decoder Parts
 					#Attention Decoder Prenet
@@ -326,8 +363,8 @@ class Tacotron():
 		self.tower_stop_token_targets = tower_stop_token_targets
 		self.tower_emt_labels = tower_emt_labels
 		self.tower_spk_labels = tower_spk_labels
-		self.tower_ref_type = tower_ref_type
-		self.tower_reference_mel = tower_ref_mel
+		self.tower_ref_mel_emt= tower_ref_mel_emt
+		self.tower_ref_mel_spk = tower_ref_mel_spk
 
 		self.all_vars = tf.trainable_variables()
 

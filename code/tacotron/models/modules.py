@@ -534,3 +534,23 @@ def shape_list(x):
       dim = shape[i]
     ret.append(dim)
   return ret
+
+class Style_Emb_Disc:
+	"""Simple classifier for style embeddings
+	"""
+	def __init__(self, output_classes, scope=None):
+		"""
+		Args:
+			layers_sizes: list of integers, the length of the list represents the number of pre-net
+				layers and the list values represent the layers number of units
+			activation: callable, activation functions of the prenet layers.
+			scope: Prenet scope.
+		"""
+		super(Style_Emb_Disc, self).__init__()
+		self.output_classes = output_classes
+		self.scope = 'style_emb_disc_'+str(output_classes) if scope is None else scope
+
+	def __call__(self, inputs):
+		with tf.variable_scope(self.scope):
+				logit = tf.layers.dense(inputs, self.output_classes)
+		return logit

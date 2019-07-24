@@ -309,6 +309,10 @@ hparams = tf.contrib.training.HParams(
 
 	#spk embedding
 	tacotron_spk_emb_dim = 1024,
+
+	#style embeddings
+	tacotron_se_concat = True, #whether to concatenate the style embeddings to encoder outputs or add them to encoder outputs
+	tacotron_style_emb_disc = True, #whether to use a classifier on the style embeddings
 	###########################################################################################################################################
 
 	#Wavenet Training
