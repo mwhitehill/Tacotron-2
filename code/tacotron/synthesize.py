@@ -91,12 +91,10 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 		#Create output path if it doesn't exist
 		os.makedirs(synth_dir, exist_ok=True)
 
-
-	metadata_filename = '../eval/eval_emt4.txt'
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, gta=GTA)
-	with open(metadata_filename, encoding='utf-8') as f:
+	synth.load(checkpoint_path, hparams, gta=GTA, use_intercross=args.intercross)
+	with open(args.metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
 		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
@@ -106,7 +104,7 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	mel_dir = os.path.join(args.input_dir, 'mels')
 	wav_dir = os.path.join(args.input_dir, 'audio')
 	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-		texts = [m[5] for m in metadata]
+		texts = [m[6] for m in metadata]
 		mel_filenames = [os.path.join(mel_dir, m[1]) for m in metadata]
 		wav_filenames = [os.path.join(wav_dir, m[0]) for m in metadata]
 		basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
@@ -265,15 +263,24 @@ def test():
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
 	parser.add_argument('--synth_style_type', default=None, help='vary the emotion, speaker id, or neither')
 	parser.add_argument('--checkpoint', default=None, help='vary the emotion, speaker id, or neither')
+	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
 	args = parser.parse_args()
 
 
 	#set manually
-	args.input_dir = r'../data/emt4'
-	args.output_dir = r'../eval/emt4'
-	args.synth_style_type='emt'
-	args.checkpoint = r'../logs-Tacotron-2/taco_pretrained'
+	dataset = 'emt4'
+	model_suffix = 'gst_zo_concat'
+	concat = True
+	cur_dir = os.getcwd()
+	one_up_dir = os.path.dirname(cur_dir)
 
+	args.intercross = True
+	args.input_dir = os.path.join(one_up_dir,'data',dataset)
+	args.output_dir = os.path.join(one_up_dir,'eval',dataset)
+	args.metadata_filename = 	os.path.join(one_up_dir, 'eval', 'eval_{}.txt'.format(dataset))
+	args.GTA=False
+	hparams.tacotron_gst_concat = concat
+	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 
 	tacotron_synthesize(args, hparams, args.checkpoint)
 

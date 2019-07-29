@@ -191,12 +191,17 @@ class Tacotron():
 					# Extend style embeddings to be compatible with encoder_outputs.
 					# Make encoder_output's dimensions by concatenating style embeddings with a vector of all zeroes.
 					# Preserves effect of both style and encoder_outputs.
-					neg = tf.add(style_embeddings, tf.negative(style_embeddings))
-					style_embeddings = tf.concat([style_embeddings, neg], axis=-1)
+
+					if not(hp.tacotron_gst_concat):
+						neg = tf.add(style_embeddings, tf.negative(style_embeddings))
+						style_embeddings = tf.concat([style_embeddings, neg], axis=-1)
 
 					# Add style embedding to every text encoder state
 					style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
-					encoder_outputs = tf.add(encoder_outputs, style_embeddings)
+					if hp.tacotron_gst_concat:
+						encoder_outputs = tf.concat([encoder_outputs, style_embeddings],axis=-1)
+					else:
+						encoder_outputs = tf.add(encoder_outputs, style_embeddings)
 
 				#Decoder Parts
 					#Attention Decoder Prenet
@@ -328,6 +333,7 @@ class Tacotron():
 		self.tower_spk_labels = tower_spk_labels
 		self.tower_ref_type = tower_ref_type
 		self.tower_reference_mel = tower_ref_mel
+		self.tower_encoder_outputs = tower_encoder_outputs
 
 		self.all_vars = tf.trainable_variables()
 

@@ -309,6 +309,9 @@ hparams = tf.contrib.training.HParams(
 
 	#spk embedding
 	tacotron_spk_emb_dim = 1024,
+
+	#concat gst
+	tacotron_gst_concat=True,
 	###########################################################################################################################################
 
 	#Wavenet Training
