@@ -24,11 +24,9 @@ test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not Non
 def get_metadata_df(path):
 
 	# load metadata into a dataframe
-	columns = ['audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
-						 'emt_label', 'spk_label', 'basename']
+	columns = ['dataset','audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
+						 'emt_label', 'spk_label', 'basename', 'sex']
 	meta_df = pd.read_csv(path, sep='|')
-	if len(meta_df.columns) == 11:
-		columns += ['sex']
 	meta_df.columns = columns
 	return(meta_df)
 
@@ -47,11 +45,11 @@ class Feeder:
 		self._args = args
 
 		# Load metadata
-		dataset_folder = os.path.dirname(metadata_filename)
+		self.data_folder = os.path.dirname(metadata_filename)
 
-		self._mel_dir = os.path.join(dataset_folder, 'mels')
-		self._linear_dir = os.path.join(dataset_folder, 'linear')
-		self._spk_emb_dir = os.path.join(dataset_folder, 'spkemb')
+		# self._mel_dir = os.path.join(dataset_folder, 'mels')
+		# self._linear_dir = os.path.join(dataset_folder, 'linear')
+		# self._spk_emb_dir = os.path.join(dataset_folder, 'spkemb')
 
 		with open(metadata_filename, encoding='utf-8') as f:
 			self._metadata = [line.strip().split('|') for line in f]
@@ -166,50 +164,30 @@ class Feeder:
 
 	def _get_test_groups(self):
 		meta = self._test_meta[self._test_offset]
-		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'test']
 		self._test_offset += 1
 
-		text = meta[6]
-		emt_label = meta[7]
-		spk_label = meta[8]
+		dataset = meta[0]
+		text = meta[7]
+		emt_label = meta[8]
+		spk_label = meta[9]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+		mel_target = np.load(os.path.join(self.data_folder,dataset,'mels', meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+		linear_target = np.load(os.path.join(self.data_folder,dataset,'linear', meta[3]))
 
 		#check for speaker embedding
-		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		spk_emb_path = os.path.join(self.data_folder,dataset,'spkemb', meta[4])
 		if os.path.exists(spk_emb_path):
 			spk_emb = np.load(spk_emb_path)
 		else:
 			spk_emb = np.zeros(hparams.tacotron_spk_emb_dim)
 		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
 
-		ref_mel_emt = np.zeros((1,80))
-		ref_mel_spk = np.zeros((1,80))
-
-		if self._args.intercross:
-			if True:#np.random.choice(['emt','spk']) == 'emt':
-				ref_mel_spk = mel_target
-				#find all mels with same emotion type
-				df_meta_same_style = df_meta[df_meta.loc[:,'emt_label'] == int(emt_label)]
-
-				#select one mel from same style to use as reference
-				idx = np.random.choice(df_meta_same_style.index)
-				mel_name = df_meta_same_style.loc[idx,'mel_filename']
-				ref_mel_emt = np.load(os.path.join(self._mel_dir, mel_name))
-
-			else:
-				ref_mel_emt = mel_target
-				# find all mels with same spk type
-				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
-
-				#select one mel from same style to use as reference
-				idx = np.random.choice(df_meta_same_style.index)
-				mel_name = df_meta_same_style.loc[idx,'mel_filename']
-				ref_mel_spk = np.load(os.path.join(self._mel_dir, mel_name))
+		#just use the same sample for the reference when testing
+		ref_mel_emt = mel_target
+		ref_mel_spk = mel_target
 
 		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
 
@@ -270,39 +248,41 @@ class Feeder:
 
 		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'train']
 
-		text = meta[6]
-		emt_label = meta[7]
-		spk_label = meta[8]
+		dataset = meta[0]
+		text = meta[7]
+		emt_label = meta[8]
+		spk_label = meta[9]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+		mel_target = np.load(os.path.join(self.data_folder, dataset, 'mels', meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+		linear_target = np.load(os.path.join(self.data_folder,dataset,'linear', meta[3]))
 
 		#check for speaker embedding
-		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		spk_emb_path = os.path.join(self.data_folder,dataset,'spkemb', meta[4])
 		if os.path.exists(spk_emb_path):
 			spk_emb = np.load(spk_emb_path)
 		else:
 			spk_emb = np.zeros(hparams.tacotron_spk_emb_dim)
 		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
 
-		ref_type = np.zeros((1,80))
-		ref_mel = np.zeros((1,80))
+		ref_mel_emt = np.zeros((1,80))
+		ref_mel_spk = np.zeros((1,80))
 
 		if self._args.intercross:
-			if True:  # np.random.choice(['emt','spk']) == 'emt':
+			if dataset == 'emt4': #np.random.choice(['emt','spk']) == 'emt':
 				ref_mel_spk = mel_target
 				# find all mels with same emotion type
-				df_meta_same_style = df_meta[df_meta.loc[:, 'emt_label'] == int(emt_label)]
+				df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == dataset]
+				df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == int(emt_label)]
 
 				# select one mel from same style to use as reference
 				idx = np.random.choice(df_meta_same_style.index)
 				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
-				ref_mel_emt = np.load(os.path.join(self._mel_dir, mel_name))
+				ref_mel_emt = np.load(os.path.join(self.data_folder, dataset, 'mels', mel_name))
 
-			else:
+			elif dataset == 'librispeech':
 				ref_mel_emt = mel_target
 				# find all mels with same spk type
 				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
@@ -310,7 +290,9 @@ class Feeder:
 				# select one mel from same style to use as reference
 				idx = np.random.choice(df_meta_same_style.index)
 				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
-				ref_mel_spk = np.load(os.path.join(self._mel_dir, mel_name))
+				ref_mel_spk = np.load(os.path.join(self.data_folder,dataset,'mels', mel_name))
+			else:
+				raise ValueError('Invalid dataset type')
 
 		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
 
@@ -404,7 +386,8 @@ def test():
 	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
 	args = parser.parse_args()
 
-	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/emt4/train.txt'
+	# metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/emt4/train.txt'
+	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train.txt'
 	coord = tf.train.Coordinator()
 	feeder = Feeder(coord, metadata_filename, hparams, args)
 

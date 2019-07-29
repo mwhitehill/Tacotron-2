@@ -262,22 +262,28 @@ def test():
 	parser.add_argument('--input_dir', default='training_data', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
-	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
-	parser.add_argument('--synth_style_type', default=None, help='vary the emotion, speaker id, or neither')
+	parser.add_argument('--GTA', default='False', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
 	parser.add_argument('--checkpoint', default=None, help='vary the emotion, speaker id, or neither')
+	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
 	args = parser.parse_args()
 
 
 	#set manually
-	args.input_dir = r'../data/emt4'
-	args.output_dir = r'../eval/emt4'
-	args.synth_style_type='emt'
-	args.checkpoint = r'../logs-Tacotron-2/taco_pretrained'
+	dataset = 'emt4'
+	model_suffix = 'gst_zo_concat'
+	concat = True
+	cur_dir = os.getcwd()
+	one_up_dir = os.path.dirname(cur_dir)
 
+	args.intercross = True
+	args.input_dir = os.path.join(one_up_dir,'data',dataset)
+	args.output_dir = os.path.join(one_up_dir,'eval',dataset)
+	args.metadata_filename = 	os.path.join(one_up_dir, 'eval', 'eval_{}.txt'.format(dataset))
+	hparams.tacotron_gst_concat = concat
+	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 
 	tacotron_synthesize(args, hparams, args.checkpoint)
 
 
 if __name__ == '__main__':
-
 	test()

@@ -26,15 +26,15 @@ def write_metadata(metadata, out_dir):
 	with open(os.path.join(out_dir, 'train.txt'), 'w', encoding='utf-8') as f:
 		for m in metadata:
 			f.write('|'.join([str(x) for x in m]) + '\n')
-	mel_frames = sum([int(m[5]) for m in metadata])
-	timesteps = sum([int(m[4]) for m in metadata])
+	mel_frames = sum([int(m[6]) for m in metadata])
+	timesteps = sum([int(m[5]) for m in metadata])
 	sr = hparams.sample_rate
 	hours = timesteps / sr / 3600
 	print('Write {} utterances, {} mel frames, {} audio timesteps, ({:.2f} hours)'.format(
 		len(metadata), mel_frames, timesteps, hours))
-	print('Max input length (text chars): {}'.format(max(len(m[6]) for m in metadata)))
-	print('Max mel frames length: {}'.format(max(int(m[5]) for m in metadata)))
-	print('Max audio timesteps length: {}'.format(max(m[4] for m in metadata)))
+	print('Max input length (text chars): {}'.format(max(len(m[7]) for m in metadata)))
+	print('Max mel frames length: {}'.format(max(int(m[6]) for m in metadata)))
+	print('Max audio timesteps length: {}'.format(max(m[5] for m in metadata)))
 
 def norm_data(args):
 

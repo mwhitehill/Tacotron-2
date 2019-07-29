@@ -195,7 +195,7 @@ class Tacotron():
 								num_heads=hp.num_heads,
 								num_units=hp.style_att_dim,
 								attention_type=hp.style_att_type)
-							style_embeddings_spk = style_attention_emt.multi_head_attention()
+							style_embeddings_spk = style_attention_spk.multi_head_attention()
 
 						else:
 							style_embeddings_emt = tf.expand_dims(refnet_outputs_emt, axis=1)  # [N, 1, 128]
@@ -214,7 +214,6 @@ class Tacotron():
 
 					#just simply concatenate the style embeddings to encoder embeddings
 					if hp.tacotron_se_concat:
-						# Add style embedding to every text encoder state
 						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
 						encoder_outputs = tf.concat([encoder_outputs, style_embeddings],axis=-1)
 

@@ -6,8 +6,22 @@ if __name__ == '__main__':
 	sys.path.append(os.getcwd())
 
 from datasets import audio
-from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
 from hparams import hparams
+
+def add_dataset_name_to_meta(dataset):
+
+	folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data',dataset)
+
+	with open(os.path.join(folder_data,'train.txt'), encoding='utf-8') as f_in:
+		with open(os.path.join(folder_data, 'train_new.txt'),'w', encoding='utf-8') as f_out:
+			for i,line in enumerate(f_in):
+				parts = line.strip().split('|')
+				parts = [dataset] + parts
+				if dataset == 'emt4':
+					parts+=['F']
+				f_out.write('|'.join([str(x) for x in parts]) + '\n')
+
+	print("wrote",i,"new lines")
 
 def modify_meta_spk_labels():
 	folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
@@ -127,4 +141,5 @@ def re_try_mels():
 
 if __name__ == '__main__':
 	# modify_meta_spk_labels()
-	re_try_mels()
+	# re_try_mels()
+	add_dataset_name_to_meta('librispeech')

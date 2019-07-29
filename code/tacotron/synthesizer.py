@@ -16,7 +16,7 @@ from tacotron.utils.text import text_to_sequence
 
 
 class Synthesizer:
-	def load(self, checkpoint_path, hparams, gta=False, model_name='Tacotron'):
+	def load(self, checkpoint_path, hparams, gta=False, use_intercross=False, model_name='Tacotron'):
 		log('Constructing model: %s' % model_name)
 		#Force the batch size to be known in order to use attention masking in batch synthesis
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
@@ -30,9 +30,11 @@ class Synthesizer:
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
-				self.model.initialize(inputs, input_lengths, targets,gta=gta, split_infos=split_infos, ref_type=ref_types, ref_mel=mel_refs)
+				self.model.initialize(inputs, input_lengths, targets,gta=gta, split_infos=split_infos, use_intercross=use_intercross,
+															ref_type=ref_types, ref_mel=mel_refs)
 			else:
-				self.model.initialize(inputs, input_lengths, split_infos=split_infos, ref_type=ref_types, ref_mel=mel_refs)
+				self.model.initialize(inputs, input_lengths, split_infos=split_infos, use_intercross=use_intercross,
+															ref_type=ref_types, ref_mel=mel_refs)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -124,7 +126,8 @@ class Synthesizer:
 		feed_dict = {
 			self.inputs: input_seqs,
 			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
-			self.ref_types: np.asarray(ref_types, dtype=np.int32)
+			self.ref_types: np.asarray(ref_types, dtype=np.int32),
+			self.mel_refs: mel_ref_seqs
 		}
 
 		if self.gta:

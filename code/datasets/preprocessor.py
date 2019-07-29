@@ -48,9 +48,9 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 			spk_label = spk_ids.index(parts[3])+1 #reserving emt4 as spk label 0
 			sex = parts[4]
 			if args.philly:
-				futures.append(_process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams))
+				futures.append(_process_utterance(args.dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams))
 			else:
-				futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)))
+				futures.append(executor.submit(partial(_process_utterance, args.dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)))
 			index += 1
 
 			if args.philly and index % 100 ==0:
@@ -65,7 +65,7 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 		return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 
-def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams):
+def _process_utterance(dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -186,4 +186,4 @@ def _process_utterance(mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio
 
 	basename = os.path.basename(audio_path)
 	# Return a tuple describing this training example
-	return (audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename, sex)
+	return (dataset, audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename, sex)
