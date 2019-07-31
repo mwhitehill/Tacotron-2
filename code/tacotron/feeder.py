@@ -175,7 +175,15 @@ class Feeder:
 		mel_target = np.load(os.path.join(self.data_folder,dataset,'mels', meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self.data_folder,dataset,'linear', meta[3]))
+
+		linear_target_path = os.path.join(self.data_folder, dataset, 'linear', meta[3])
+		if hparams.predict_linear:
+			if os.path.exists(linear_target_path):
+				linear_target = np.load(linear_target_path)
+			else:
+				raise ("linear target does not exist -", linear_target_path)
+		else:
+			linear_target = np.zeros((1,hparams.num_freq))
 
 		#check for speaker embedding
 		spk_emb_path = os.path.join(self.data_folder,dataset,'spkemb', meta[4])
@@ -257,7 +265,15 @@ class Feeder:
 		mel_target = np.load(os.path.join(self.data_folder, dataset, 'mels', meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self.data_folder,dataset,'linear', meta[3]))
+
+		linear_target_path = os.path.join(self.data_folder, dataset, 'linear', meta[3])
+		if hparams.predict_linear:
+			if os.path.exists(linear_target_path):
+				linear_target = np.load(linear_target_path)
+			else:
+				raise ("linear target does not exist -", linear_target_path)
+		else:
+			linear_target = np.zeros((1,hparams.num_freq))
 
 		#check for speaker embedding
 		spk_emb_path = os.path.join(self.data_folder,dataset,'spkemb', meta[4])
@@ -267,8 +283,8 @@ class Feeder:
 			spk_emb = np.zeros(hparams.tacotron_spk_emb_dim)
 		assert spk_emb.shape[0] == hparams.tacotron_spk_emb_dim
 
-		ref_mel_emt = np.zeros((1,80))
-		ref_mel_spk = np.zeros((1,80))
+		ref_mel_emt = np.zeros((1,hparams.num_mels))
+		ref_mel_spk = np.zeros((1,hparams.num_mels))
 
 		if self._args.intercross:
 			if dataset == 'emt4': #np.random.choice(['emt','spk']) == 'emt':

@@ -115,9 +115,9 @@ def re_try_mels():
 	with open(df_train_txt_path, encoding='utf-8') as f:
 		parts = [line.strip().split('|') for line in f]
 		for i,p in enumerate(parts[:]):
-			audio_path = os.path.join(folder_data,'audio',p[0])
-			mel_path = os.path.join(folder_data,'mels',p[1])
-			linear_path = os.path.join(folder_data,'linear',p[2])
+			audio_path = os.path.join(folder_data,'audio',p[1])
+			mel_path = os.path.join(folder_data,'mels',p[2])
+			linear_path = os.path.join(folder_data,'linear',p[3])
 			try:
 				a = np.load(audio_path)
 				# print("loaded audio")
@@ -127,7 +127,7 @@ def re_try_mels():
 				# print("loaded linear")
 			except:
 				print("couldn't load", audio_path,"- now resaving.")
-				wav_filename = p[9]
+				wav_filename = p[10]
 				spk_id, book_id, _ = wav_filename.split('-')
 				wav_path = os.path.join(folder_raw,spk_id,book_id,wav_filename)
 				re_save_all(wav_path, audio_path,mel_path,linear_path)
