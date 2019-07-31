@@ -192,7 +192,7 @@ def train(log_dir, args, hparams):
 	if args.emt_disc:
 		emt_disc_loss_window = ValueWindow(100)
 		emt_disc_acc_window = ValueWindow(100)
-	saver = tf.train.Saver(max_to_keep=20)
+	saver = tf.train.Saver(max_to_keep=2)
 
 	log('Tacotron training set to a maximum of {} steps'.format(args.tacotron_train_steps))
 
@@ -236,7 +236,7 @@ def train(log_dir, args, hparams):
 				if args.emt_disc:
 					step, loss, opt, emt_disc_loss, emt_disc_acc = sess.run([global_step, model.loss,model.optimize,model.emt_disc_loss,model.emt_disc_acc])
 				else:
-					step, loss, opt = sess.run([global_step, model.loss,model.optimize])
+					step, loss, opt = sess.run([global_step, model.loss, model.optimize])
 				time_window.append(time.time() - start_time)
 				loss_window.append(loss)
 				if args.emt_disc:

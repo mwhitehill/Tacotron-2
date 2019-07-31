@@ -91,22 +91,20 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 		#Create output path if it doesn't exist
 		os.makedirs(synth_dir, exist_ok=True)
 
-
-	metadata_filename = '../eval/eval_emt4.txt'
 	log(hparams_debug_string())
 	synth = Synthesizer()
 	synth.load(checkpoint_path, hparams, gta=GTA)
-	with open(metadata_filename, encoding='utf-8') as f:
+	with open(args.metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
-		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
+		hours = sum([int(x[5]) for x in metadata]) * frame_shift_ms / (3600)
 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
 
 	log('Starting Synthesis')
 	mel_dir = os.path.join(args.input_dir, 'mels')
 	wav_dir = os.path.join(args.input_dir, 'audio')
 	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-		texts = [m[5] for m in metadata]
+		texts = [m[7] for m in metadata]
 		mel_filenames = [os.path.join(mel_dir, m[1]) for m in metadata]
 		wav_filenames = [os.path.join(wav_dir, m[0]) for m in metadata]
 		basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
@@ -269,16 +267,15 @@ def test():
 
 
 	#set manually
-	dataset = 'emt4'
-	model_suffix = 'gst_zo_concat'
+	model_suffix = '2conds'
 	concat = True
 	cur_dir = os.getcwd()
 	one_up_dir = os.path.dirname(cur_dir)
 
 	args.intercross = True
-	args.input_dir = os.path.join(one_up_dir,'data',dataset)
-	args.output_dir = os.path.join(one_up_dir,'eval',dataset)
-	args.metadata_filename = 	os.path.join(one_up_dir, 'eval', 'eval_{}.txt'.format(dataset))
+	args.input_dir = os.path.join(one_up_dir,'data')
+	args.output_dir = os.path.join(one_up_dir,'eval')
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval.txt')
 	hparams.tacotron_gst_concat = concat
 	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 

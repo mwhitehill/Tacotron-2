@@ -245,7 +245,7 @@ hparams = tf.contrib.training.HParams(
 	#global conditioning
 	gin_channels = -1, #Set this to -1 to disable global conditioning, Only used for multi speaker dataset. It defines the depth of the embeddings (Recommended: 16)
 	use_speaker_embedding = False, #True, #whether to make a speaker embedding
-	n_speakers = 5, #number of speakers (rows of the embedding)
+	n_speakers=5,  # number of speakers (rows of the embedding)
 	speakers_path = None, #Defines path to speakers metadata. Can be either in "speaker\tglobal_id" (with header) tsv format, or a single column tsv with speaker names. If None, use "speakers".
 	speakers = ['speaker0', 'speaker1', #List of speakers used for embeddings visualization. (Consult "wavenet_vocoder/train.py" if you want to modify the speaker names source).
 				'speaker2', 'speaker3', 'speaker4'], #Must be consistent with speaker ids specified for global conditioning for correct visualization.
@@ -312,7 +312,10 @@ hparams = tf.contrib.training.HParams(
 
 	#style embeddings
 	tacotron_se_concat = True, #whether to concatenate the style embeddings to encoder outputs or add them to encoder outputs
-	tacotron_style_emb_disc = True, #whether to use a classifier on the style embeddings
+	tacotron_use_style_emb_disc = True, #whether to use a classifier on the style embeddings
+	tacotron_n_emt = 4, #how many emotion classes in training set
+	tacotron_n_spk = 252, #how many speakers  in training set (1 - emt4, 251 - librispeech clean speech 100)
+	tacotron_use_orthog_loss = True, #whether to use orthogonality loss between style embeddings
 	###########################################################################################################################################
 
 	#Wavenet Training

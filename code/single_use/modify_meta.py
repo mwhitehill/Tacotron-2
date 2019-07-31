@@ -39,7 +39,7 @@ def modify_meta_spk_labels():
 		with open(os.path.join(path_exist_train_folder, 'train_new.txt'),'w', encoding='utf-8') as f_out:
 			for i,line in enumerate(f_in):
 				parts = line.strip().split('|')
-				parts[8] = spk_ids.index(parts[8])+1 #reserving emt4 as spk label 0
+				parts[9] = spk_ids.index(parts[9])+1 #reserving emt4 as spk label 0
 				f_out.write('|'.join([str(x) for x in parts]) + '\n')
 
 	print("wrote",i,"new lines")
@@ -140,6 +140,6 @@ def re_try_mels():
 
 
 if __name__ == '__main__':
-	# modify_meta_spk_labels()
+	modify_meta_spk_labels()
 	# re_try_mels()
-	add_dataset_name_to_meta('librispeech')
+	# add_dataset_name_to_meta('librispeech')

@@ -118,7 +118,11 @@ class Tacotron():
 		self.tower_mel_outputs = []
 		self.tower_linear_outputs = []
 		self.tower_emt_disc_outputs = []
+		self.tower_renet_out_emt = []
+		self.tower_renet_out_spk = []
 		self.tower_style_embeddings = []
+		self.tower_style_emb_logit_emt = []
+		self.tower_style_emb_logit_spk = []
 
 		tower_embedded_inputs = []
 		tower_enc_conv_output_shape = []
@@ -230,9 +234,14 @@ class Tacotron():
 						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
 						encoder_outputs = tf.add(encoder_outputs, style_embeddings)
 
-				if hp.tacotron_style_emb_disc:
-					self.style_emb_logit_emt = Style_Emb_Disc(style_embeddings_emt, 4)
-					self.style_emb_logit_spk = Style_Emb_Disc(style_embeddings_spk, )
+					if hp.tacotron_use_style_emb_disc:
+						style_emb_disc_emt = Style_Emb_Disc(self._hparams.tacotron_n_emt)
+						style_emb_disc_spk = Style_Emb_Disc(self._hparams.tacotron_n_spk)
+						style_emb_logit_emt = style_emb_disc_emt(style_embeddings_emt)
+						style_emb_logit_spk = style_emb_disc_spk(style_embeddings_spk)
+					else:
+						style_emb_logit_emt = tf.zeros(1)
+						style_emb_logit_spk = tf.zeros(1)
 
 				#Decoder Parts
 					#Attention Decoder Prenet
@@ -338,9 +347,13 @@ class Tacotron():
 
 					self.tower_decoder_output.append(decoder_output)
 					self.tower_alignments.append(alignments)
+					self.tower_renet_out_emt.append(refnet_outputs_emt)
+					self.tower_renet_out_spk.append(refnet_outputs_spk)
 					self.tower_style_embeddings.append(style_embeddings)
 					self.tower_stop_token_prediction.append(stop_token_prediction)
 					self.tower_mel_outputs.append(mel_outputs)
+					self.tower_style_emb_logit_emt.append(style_emb_logit_emt)
+					self.tower_style_emb_logit_spk.append(style_emb_logit_spk)
 					tower_embedded_inputs.append(embedded_inputs)
 					tower_enc_conv_output_shape.append(enc_conv_output_shape)
 					tower_encoder_outputs.append(encoder_outputs)
@@ -400,6 +413,9 @@ class Tacotron():
 		self.tower_stop_token_loss = []
 		self.tower_regularization_loss = []
 		self.tower_linear_loss = []
+		self.tower_style_emb_loss_emt = []
+		self.tower_style_emb_loss_spk = []
+		self.tower_style_emb_orthog_loss = []
 		self.tower_loss = []
 
 		total_before_loss = 0
@@ -407,6 +423,9 @@ class Tacotron():
 		total_stop_token_loss = 0
 		total_regularization_loss = 0
 		total_linear_loss = 0
+		total_style_emb_loss_emt = 0
+		total_style_emb_loss_spk = 0
+		total_style_emb_orthog_loss = 0
 
 		total_loss = 0
 
@@ -457,6 +476,26 @@ class Tacotron():
 						else:
 							linear_loss = 0.
 
+					if hp.tacotron_use_style_emb_disc:
+						emt_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_emt_labels[i]), self._hparams.tacotron_n_emt)
+						style_emb_loss_emt_logit = self.tower_style_emb_logit_emt[i]
+						style_emb_loss_emt = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=style_emb_loss_emt_logit,
+																																												labels=emt_labels_one_hot))
+
+						spk_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_spk_labels[i]), self._hparams.tacotron_n_spk)
+						style_emb_loss_spk_logit = self.tower_style_emb_logit_spk[i]
+						style_emb_loss_spk = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=style_emb_loss_spk_logit,
+																																												labels=spk_labels_one_hot))
+					else:
+						style_emb_loss_emt=0
+						style_emb_loss_spk=0
+
+					if hp.tacotron_use_orthog_loss:
+						style_emb_orthog_loss = tf.tensordot(self.tower_renet_out_emt[i],tf.transpose(self.tower_renet_out_spk[i]),1)
+						style_emb_orthog_loss = .02 * tf.norm(style_emb_orthog_loss) #paper uses squared frobenius, think mistake, just use frobenius
+					else:
+						style_emb_orthog_loss = 0
+
 					if self.use_emt_disc:
 						emt_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_emt_labels[i]), 4)
 						emt_disc_logit = self.tower_emt_disc_outputs[i]
@@ -487,8 +526,9 @@ class Tacotron():
 					self.tower_regularization_loss.append(regularization)
 					self.tower_linear_loss.append(linear_loss)
 					self.tower_emt_disc_loss.append(emt_disc_loss)
+					self.tower_style_emb_orthog_loss.append(style_emb_orthog_loss)
 
-					tower_loss = before + after + stop_token_loss + regularization + linear_loss + emt_disc_loss
+					tower_loss = before + after + stop_token_loss + regularization + linear_loss + emt_disc_loss + style_emb_loss_emt + style_emb_loss_spk + style_emb_orthog_loss
 					self.tower_loss.append(tower_loss)
 
 					self.tower_emt_disc_acc.append(emt_disc_acc)
@@ -499,6 +539,9 @@ class Tacotron():
 			total_regularization_loss += regularization
 			total_linear_loss += linear_loss
 			total_emt_disc_loss += emt_disc_loss
+			total_style_emb_loss_emt += style_emb_loss_emt
+			total_style_emb_loss_spk += style_emb_loss_spk
+			total_style_emb_orthog_loss += style_emb_orthog_loss
 			total_loss += tower_loss
 
 			total_emt_disc_acc += emt_disc_acc
@@ -509,6 +552,9 @@ class Tacotron():
 		self.regularization_loss = total_regularization_loss / hp.tacotron_num_gpus
 		self.linear_loss = total_linear_loss / hp.tacotron_num_gpus
 		self.emt_disc_loss = total_emt_disc_loss / hp.tacotron_num_gpus
+		self.style_emb_loss_emt = total_style_emb_loss_emt / hp.tacotron_num_gpus
+		self.style_emb_loss_spk = total_style_emb_loss_spk / hp.tacotron_num_gpus
+		self.style_emb_orthog_loss = total_style_emb_orthog_loss / hp.tacotron_num_gpus
 		self.loss = total_loss / hp.tacotron_num_gpus
 
 		self.emt_disc_acc = total_emt_disc_acc / hp.tacotron_num_gpus
