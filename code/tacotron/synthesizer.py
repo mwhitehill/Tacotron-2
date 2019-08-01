@@ -2,6 +2,7 @@ import os
 import wave
 from datetime import datetime
 import platform
+import time
 
 import numpy as np
 import pyaudio
@@ -24,17 +25,17 @@ class Synthesizer:
 		targets = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_targets')
 		split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos')
 
-		ref_types = tf.placeholder(tf.int32, (None), name='ref_types')
-		mel_refs = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs')
+		mel_refs_emt = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs_emt')
+		mel_refs_spk = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs_spk')
 
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
-				self.model.initialize(inputs, input_lengths, targets,gta=gta, split_infos=split_infos, use_intercross=use_intercross,
-															ref_type=ref_types, ref_mel=mel_refs)
+				self.model.initialize(inputs, input_lengths, targets, gta=gta, split_infos=split_infos, use_intercross=use_intercross,
+															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk)
 			else:
 				self.model.initialize(inputs, input_lengths, split_infos=split_infos, use_intercross=use_intercross,
-															ref_type=ref_types, ref_mel=mel_refs)
+															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -65,8 +66,8 @@ class Synthesizer:
 		self.targets = targets
 		self.split_infos = split_infos
 
-		self.ref_types = ref_types
-		self.mel_refs = mel_refs
+		self.mel_refs_emt = mel_refs_emt
+		self.mel_refs_spk = mel_refs_spk
 
 		log('Loading checkpoint: %s' % checkpoint_path)
 		#Memory allocation on the GPUs as needed
@@ -81,8 +82,8 @@ class Synthesizer:
 		saver.restore(self.session, checkpoint_path)
 
 
-	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, ref_types=None,mel_ref_filenames=None,
-								 basenames_refs=None):
+	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, basenames_refs=None,
+								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None):
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -92,11 +93,13 @@ class Synthesizer:
 		while len(texts) % hparams.tacotron_synthesis_batch_size != 0:
 			texts.append(texts[-1])
 			basenames.append(basenames[-1])
-			ref_types.append(ref_types[-1])
+			basenames_refs.append(basenames_refs[-1])
 			if mel_filenames is not None:
 				mel_filenames.append(mel_filenames[-1])
-			if mel_ref_filenames is not None:
-				mel_ref_filenames.append(mel_ref_filenames[-1])
+			if mel_ref_filenames_emt is not None:
+				mel_ref_filenames_emt.append(mel_ref_filenames_emt[-1])
+			if mel_ref_filenames_spk is not None:
+				mel_ref_filenames_spk.append(mel_ref_filenames_spk[-1])
 
 		assert 0 == len(texts) % self._hparams.tacotron_num_gpus
 		seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
@@ -107,9 +110,10 @@ class Synthesizer:
 		input_seqs = None
 		split_infos = []
 
-		np_mel_refs = [np.load(f) for f in mel_ref_filenames]
-		mel_ref_lengths = [len(f) for f in np_mel_refs]
-		mel_ref_seqs = None
+		np_mel_refs_emt = [np.load(f) for f in mel_ref_filenames_emt]
+		np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
+		mel_ref_seqs_emt = None
+		mel_ref_seqs_spk = None
 
 		for i in range(self._hparams.tacotron_num_gpus):
 			device_input = seqs[size_per_device*i: size_per_device*(i+1)]
@@ -117,17 +121,21 @@ class Synthesizer:
 
 			input_seqs = np.concatenate((input_seqs, device_input), axis=1) if input_seqs is not None else device_input
 
-			device_mel_ref = np_mel_refs[size_per_device * i: size_per_device * (i + 1)]
-			device_mel_ref, max_mel_ref_len = self._prepare_targets(device_mel_ref, self._hparams.outputs_per_step)
-			mel_ref_seqs = np.concatenate((mel_ref_seqs, device_mel_ref), axis=1) if mel_ref_seqs is not None else device_mel_ref
+			device_mel_ref_emt = np_mel_refs_emt[size_per_device * i: size_per_device * (i + 1)]
+			device_mel_ref_emt, max_mel_ref_len_emt = self._prepare_targets(device_mel_ref_emt, self._hparams.outputs_per_step)
+			mel_ref_seqs_emt = np.concatenate((mel_ref_seqs_emt, device_mel_ref_emt), axis=1) if mel_ref_seqs_emt is not None else device_mel_ref_emt
 
-			split_infos.append([max_seq_len, 0, 0, 0, 0, max_mel_ref_len])
+			device_mel_ref_spk = np_mel_refs_spk[size_per_device * i: size_per_device * (i + 1)]
+			device_mel_ref_spk, max_mel_ref_len_spk = self._prepare_targets(device_mel_ref_spk, self._hparams.outputs_per_step)
+			mel_ref_seqs_spk = np.concatenate((mel_ref_seqs_spk, device_mel_ref_spk), axis=1) if mel_ref_seqs_spk is not None else device_mel_ref_spk
+
+			split_infos.append([max_seq_len, 0, 0, 0, 0, max_mel_ref_len_emt, max_mel_ref_len_spk])
 
 		feed_dict = {
 			self.inputs: input_seqs,
 			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
-			self.ref_types: np.asarray(ref_types, dtype=np.int32),
-			self.mel_refs: mel_ref_seqs
+			self.mel_refs_emt: mel_ref_seqs_emt,
+			self.mel_refs_spk: mel_ref_seqs_spk,
 		}
 
 		if self.gta:
@@ -148,7 +156,18 @@ class Synthesizer:
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
 		if self.gta or not hparams.predict_linear:
-			mels, alignments, stop_tokens = self.session.run([self.mel_outputs, self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
+			mels, alignments, stop_tokens, ref_emt, ref_spk = self.session.run([self.mel_outputs,
+																												self.alignments,
+																												self.stop_token_prediction,
+																												self.model.tower_ref_mel_emt[0],
+																												self.model.tower_ref_mel_spk[0]], feed_dict=feed_dict)
+
+			# for i,(m1,m2,m3) in enumerate(zip(mels[0],ref_emt,ref_spk)):
+			# 	np.save('../eval/mels_save/{}_mel.npy'.format(i),m1)
+			# 	np.save('../eval/mels_save/{}_ref_emt.npy'.format(i), m2)
+			# 	np.save('../eval/mels_save/{}_ref_spk.npy'.format(i), m3)
+			# time.sleep(.5)
+			# raise
 
 			#Linearize outputs (n_gpus -> 1D)
 			mels = [mel for gpu_mels in mels for mel in gpu_mels]

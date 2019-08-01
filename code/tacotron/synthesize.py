@@ -95,138 +95,35 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	synth = Synthesizer()
 	synth.load(checkpoint_path, hparams, gta=GTA)
 	with open(args.metadata_filename, encoding='utf-8') as f:
-		metadata = [line.strip().split('|') for line in f]
+		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
-		hours = sum([int(x[5]) for x in metadata]) * frame_shift_ms / (3600)
+		hours = sum([int(x[6]) for x in metadata]) * frame_shift_ms / (3600)
 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
 
 	log('Starting Synthesis')
-	mel_dir = os.path.join(args.input_dir, 'mels')
-	wav_dir = os.path.join(args.input_dir, 'audio')
-	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-		texts = [m[7] for m in metadata]
-		mel_filenames = [os.path.join(mel_dir, m[1]) for m in metadata]
-		wav_filenames = [os.path.join(wav_dir, m[0]) for m in metadata]
-		basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
-		basenames_refs = [m[10] for m in metadata]
-		mel_ref_filenames = [os.path.join(mel_dir, m[11]) for m in metadata]
-		ref_types = np.ones(len(mel_filenames),dtype=int) * 1
-		mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
-																												 ref_types=ref_types,mel_ref_filenames=mel_ref_filenames,
-																												 basenames_refs=basenames_refs)
+	texts = [m[7] for m in metadata]
+	mel_filenames = [os.path.join(args.input_dir, m[0], 'mels', m[2]) for m in metadata]
+	basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
+	basenames_refs = [m[11]+'_'+m[13] for m in metadata]
 
-		for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
-			file.write('|'.join([str(x) for x in elems]) + '\n')
-	log('synthesized mel spectrograms at {}'.format(synth_dir))
-	return os.path.join(synth_dir, 'map.txt')
+	mel_ref_filenames_emt = []
+	mel_ref_filenames_spk = []
+	for m in metadata:
+			if m[12] == 'same':
+				mel_ref_filenames_emt.append(os.path.join(args.input_dir, m[0], 'mels', m[2]))
+			else:
+				mel_ref_filenames_emt.append(os.path.join(args.input_dir, 'emt4', 'mels', m[12]))
 
+			if m[14] == 'same':
+				mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
+			else:
+				mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'librispeech', 'mels', m[14]))
 
-# def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
-# 	GTA = (args.GTA == 'True')
-# 	if GTA:
-# 		synth_dir = os.path.join(output_dir, 'gta')
-#
-# 		#Create output path if it doesn't exist
-# 		os.makedirs(synth_dir, exist_ok=True)
-# 	else:
-# 		synth_dir = os.path.join(output_dir, 'natural')
-#
-# 		#Create output path if it doesn't exist
-# 		os.makedirs(synth_dir, exist_ok=True)
-#
-#
-# 	metadata_filename = os.path.join(args.input_dir, 'train.txt')
-# 	log(hparams_debug_string())
-# 	synth = Synthesizer()
-# 	synth.load(checkpoint_path, hparams, gta=GTA)
-# 	with open(metadata_filename, encoding='utf-8') as f:
-# 		metadata = [line.strip().split('|') for line in f]
-# 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
-# 		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
-# 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
-#
-# 	meta_df_all = get_metadata_df(metadata_filename)
-#
-# 	#Set inputs batch wise
-# 	metadata = [metadata[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
-# 	meta_df_list = [meta_df_all.iloc[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
-#
-# 	metadata = metadata[:5]
-# 	metadata_df = metadata_df[:5]
-#
-# 	log('Starting Synthesis')
-# 	mel_dir = os.path.join(args.input_dir, 'mels')
-# 	wav_dir = os.path.join(args.input_dir, 'audio')
-# 	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-# 		for i, (meta,meta_df) in enumerate(tqdm(zip(metadata,meta_df_list))):
-# 			texts = [m[5] for m in meta]
-# 			mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
-# 			wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
-# 			basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
-#
-# 			mel_ref_filenames = []
-# 			# if args.synth_style_type == 'emt':
-# 			labels = meta_df.loc[:, 'emt_labels']
-#
-# 			for l in labels:
-# 				idx = np.random.choice(meta_df_all[meta_df_all.loc[:,'emt_labels'] == l].index)
-# 				mel_ref_filenames.append(meta_df_all.iloc[idx,'mel_filename'].object.value)
-# 			print(mel_ref_filenames)
-#
-# 	# 		# elif args.synth_style_type == 'spk':
-# 	# 		# 	labels = meta_df.loc[:, 'spk_labels']
-# 	# 		#
-# 	# 		# else:
-# 	#
-# 	# 		mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, None, mel_filenames)
-# 	#
-# 	# 		for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
-# 	# 			file.write('|'.join([str(x) for x in elems]) + '\n')
-# 	# log('synthesized mel spectrograms at {}'.format(synth_dir))
-# 	# return os.path.join(synth_dir, 'map.txt')
-
-def run_synthesis(args, checkpoint_path, output_dir, hparams):
-	GTA = (args.GTA == 'True')
-	if GTA:
-		synth_dir = os.path.join(output_dir, 'gta')
-
-		#Create output path if it doesn't exist
-		os.makedirs(synth_dir, exist_ok=True)
-	else:
-		synth_dir = os.path.join(output_dir, 'natural')
-
-		#Create output path if it doesn't exist
-		os.makedirs(synth_dir, exist_ok=True)
-
-
-	metadata_filename = os.path.join(args.input_dir, 'train.txt')
-	log(hparams_debug_string())
-	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, gta=GTA)
-	with open(metadata_filename, encoding='utf-8') as f:
-		metadata = [line.strip().split('|') for line in f]
-		frame_shift_ms = hparams.hop_size / hparams.sample_rate
-		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
-		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
-
-	#Set inputs batch wise
-	metadata = [metadata[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
-
-	log('Starting Synthesis')
-	mel_dir = os.path.join(args.input_dir, 'mels')
-	wav_dir = os.path.join(args.input_dir, 'audio')
-	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-		for i, meta in enumerate(tqdm(metadata)):
-			texts = [m[5] for m in meta]
-			mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
-			wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
-			basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
-			mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, None, mel_filenames)
-
-			for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
-				file.write('|'.join([str(x) for x in elems]) + '\n')
-	log('synthesized mel spectrograms at {}'.format(synth_dir))
-	return os.path.join(synth_dir, 'map.txt')
+	mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
+																											 basenames_refs=basenames_refs,
+																											 mel_ref_filenames_emt=mel_ref_filenames_emt,
+																											 mel_ref_filenames_spk=mel_ref_filenames_spk)
+	return None
 
 def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 	# output_dir = 'tacotron_' + args.output_dir
@@ -267,15 +164,16 @@ def test():
 
 
 	#set manually
-	model_suffix = '2conds'
+	model_suffix = '2conds_disc_orthog_1gpu'
 	concat = True
 	cur_dir = os.getcwd()
 	one_up_dir = os.path.dirname(cur_dir)
 
 	args.intercross = True
+	args.GTA=False
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
-	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval.txt')
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test.txt')
 	hparams.tacotron_gst_concat = concat
 	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 
