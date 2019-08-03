@@ -83,7 +83,7 @@ class Synthesizer:
 
 
 	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, basenames_refs=None,
-								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None):
+								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None, emb_only=False):
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -111,7 +111,12 @@ class Synthesizer:
 		split_infos = []
 
 		np_mel_refs_emt = [np.load(f) for f in mel_ref_filenames_emt]
-		np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
+		#if just getting embedding, will use the same emt ref and spk ref
+		if emb_only:
+			np_mel_refs_spk = np_mel_refs_emt
+		else:
+			np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
+
 		mel_ref_seqs_emt = None
 		mel_ref_seqs_spk = None
 
@@ -155,13 +160,23 @@ class Synthesizer:
 
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
+		if emb_only:
+
+			return(self.session.run([self.model.tower_refnet_out_emt[0],
+															 self.model.tower_refnet_out_spk[0]],
+																					feed_dict=feed_dict))
+
 		if self.gta or not hparams.predict_linear:
-			mels, alignments, stop_tokens, ref_emt, ref_spk = self.session.run([self.mel_outputs,
+			mels, alignments, stop_tokens, refnet_emt, refnet_spk, ref_emt, ref_spk = self.session.run([self.mel_outputs,
 																												self.alignments,
 																												self.stop_token_prediction,
+																												self.model.tower_refnet_out_emt[0],
+																												self.model.tower_refnet_out_spk[0],
 																												self.model.tower_ref_mel_emt[0],
 																												self.model.tower_ref_mel_spk[0]], feed_dict=feed_dict)
 
+			# print(refnet_emt[:,0:5])
+			# print(refnet_spk[:,0:5])
 			# for i,(m1,m2,m3) in enumerate(zip(mels[0],ref_emt,ref_spk)):
 			# 	np.save('../eval/mels_save/{}_mel.npy'.format(i),m1)
 			# 	np.save('../eval/mels_save/{}_ref_emt.npy'.format(i), m2)

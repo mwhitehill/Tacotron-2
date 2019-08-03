@@ -118,8 +118,8 @@ class Tacotron():
 		self.tower_mel_outputs = []
 		self.tower_linear_outputs = []
 		self.tower_emt_disc_outputs = []
-		self.tower_renet_out_emt = []
-		self.tower_renet_out_spk = []
+		self.tower_refnet_out_emt = []
+		self.tower_refnet_out_spk = []
 		self.tower_style_embeddings = []
 		self.tower_style_emb_logit_emt = []
 		self.tower_style_emb_logit_spk = []
@@ -172,7 +172,8 @@ class Tacotron():
 							kernel_size=(3, 3),
 							strides=(2, 2),
 							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
-							is_training=is_training)  # [N, 128]
+							is_training=is_training,
+							scope='refnet_emt')  # [N, 128]
 
 						refnet_outputs_spk = reference_encoder(
 							tower_ref_mel_spk[i],
@@ -180,7 +181,8 @@ class Tacotron():
 							kernel_size=(3, 3),
 							strides=(2, 2),
 							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
-							is_training=is_training)  # [N, 128]
+							is_training=is_training,
+							scope='refnet_spk')  # [N, 128]
 
 						if hp.use_gst:
 							# Style attention
@@ -235,8 +237,8 @@ class Tacotron():
 						encoder_outputs = tf.add(encoder_outputs, style_embeddings)
 
 					if hp.tacotron_use_style_emb_disc:
-						style_emb_disc_emt = Style_Emb_Disc(self._hparams.tacotron_n_emt)
-						style_emb_disc_spk = Style_Emb_Disc(self._hparams.tacotron_n_spk)
+						style_emb_disc_emt = Style_Emb_Disc(self._hparams.tacotron_n_emt,scope='style_disc_emt')
+						style_emb_disc_spk = Style_Emb_Disc(self._hparams.tacotron_n_spk,scope='style_disc_spk')
 						style_emb_logit_emt = style_emb_disc_emt(style_embeddings_emt)
 						style_emb_logit_spk = style_emb_disc_spk(style_embeddings_spk)
 					else:
@@ -347,8 +349,8 @@ class Tacotron():
 
 					self.tower_decoder_output.append(decoder_output)
 					self.tower_alignments.append(alignments)
-					self.tower_renet_out_emt.append(refnet_outputs_emt)
-					self.tower_renet_out_spk.append(refnet_outputs_spk)
+					self.tower_refnet_out_emt.append(refnet_outputs_emt)
+					self.tower_refnet_out_spk.append(refnet_outputs_spk)
 					self.tower_style_embeddings.append(style_embeddings)
 					self.tower_stop_token_prediction.append(stop_token_prediction)
 					self.tower_mel_outputs.append(mel_outputs)
@@ -491,7 +493,7 @@ class Tacotron():
 						style_emb_loss_spk=0
 
 					if hp.tacotron_use_orthog_loss:
-						style_emb_orthog_loss = tf.tensordot(self.tower_renet_out_emt[i],tf.transpose(self.tower_renet_out_spk[i]),1)
+						style_emb_orthog_loss = tf.tensordot(self.tower_refnet_out_emt[i],tf.transpose(self.tower_refnet_out_spk[i]),1)
 						style_emb_orthog_loss = .02 * tf.norm(style_emb_orthog_loss) #paper uses squared frobenius, think mistake, just use frobenius
 					else:
 						style_emb_orthog_loss = 0

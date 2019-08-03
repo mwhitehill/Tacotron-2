@@ -5,6 +5,7 @@ import time
 from time import sleep
 import numpy as np
 import tensorflow as tf
+import pandas as pd
 
 if __name__ == '__main__':
 	import sys
@@ -125,6 +126,57 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 																											 mel_ref_filenames_spk=mel_ref_filenames_spk)
 	return None
 
+def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
+
+	emb_dir = os.path.join(output_dir, 'embeddings')
+	os.makedirs(emb_dir, exist_ok=True)
+	meta_path = os.path.join(emb_dir,'meta.tsv')
+	emb_emt_path = os.path.join(emb_dir,'emb_emt.tsv')
+	emb_spk_path = os.path.join(emb_dir,'emb_spk.tsv')
+
+	with open(args.train_filename , encoding='utf-8') as f:
+		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
+
+	df_meta = get_metadata_df(args.train_filename)
+
+	spk_ids = df_meta.spk_label.unique()
+	spk_ids_chosen = np.sort(np.random.choice(spk_ids,args.n_spk))
+
+	#make sure first user is in embeddings (zo - the one with emotions)
+	if not(0 in spk_ids_chosen):
+		spk_ids_chosen = np.sort(np.append(spk_ids_chosen,0))
+
+	chosen_idx = []
+	for id in spk_ids_chosen:
+		spk_rows = df_meta[df_meta.loc[:, 'spk_label'] == id]
+		if id ==0:
+			for emt in range(4):
+				emt_rows = spk_rows[spk_rows.loc[:, 'emt_label'] == emt]
+				chosen_idx += list(np.random.choice(emt_rows.index.values, args.n_emt))
+		else:
+			chosen_idx += list(np.random.choice(spk_rows.index.values,args.n_per_spk))
+
+	df_meta_chosen = df_meta.iloc[np.array(sorted(chosen_idx))]
+
+	mel_filenames = [os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename) for idx,row in df_meta_chosen.iterrows()]
+	texts = list(df_meta_chosen.text)
+
+	synth = Synthesizer()
+	synth.load(checkpoint_path, hparams)
+	print("getting embedding for {} samples".format(len(mel_filenames)))
+
+	emb_emt, emb_spk = synth.synthesize(texts, None, None, None, mel_filenames,
+																											 mel_ref_filenames_emt=mel_filenames,
+																											 mel_ref_filenames_spk=mel_filenames,
+																											 emb_only=True)
+
+	#SAVE META + EMBEDDING CSVS
+	columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
+	df_meta_chosen.loc[:,columns_to_keep].to_csv(meta_path, sep='\t', index=False)
+
+	pd.DataFrame(emb_emt).to_csv(emb_emt_path,sep='\t',index=False, header=False)
+	pd.DataFrame(emb_spk).to_csv(emb_spk_path, sep='\t', index=False, header=False)
+
 def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 	# output_dir = 'tacotron_' + args.output_dir
 	output_dir = args.output_dir
@@ -148,6 +200,8 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 	elif args.mode == 'synthesis':
 		# return run_synthesis(args, checkpoint_path, output_dir, hparams)
 		return run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams)
+	elif args.mode == 'style_embs':
+		get_style_embeddings(args, checkpoint_path, output_dir, hparams)
 	else:
 		run_live(args, checkpoint_path, hparams)
 
@@ -164,8 +218,17 @@ def test():
 
 
 	#set manually
-	model_suffix = '2conds_disc_orthog_1gpu'
+	model_suffix = '2conds_disc_orthog'
+	args.mode = 'style_embs' #'synthesis'
+
+	#MODEL SETTINGS
 	concat = True
+
+	#EMBEDDING SETTINGS
+	args.n_spk = 5
+	args.n_emt = 10
+	args.n_per_spk = 10
+
 	cur_dir = os.getcwd()
 	one_up_dir = os.path.dirname(cur_dir)
 
@@ -174,6 +237,7 @@ def test():
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
 	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test.txt')
+	args.train_filename = os.path.join(one_up_dir, 'data/train.txt')
 	hparams.tacotron_gst_concat = concat
 	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 

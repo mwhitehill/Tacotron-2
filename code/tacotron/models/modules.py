@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-def reference_encoder(inputs, filters, kernel_size, strides, encoder_cell, is_training, scope='ref_encoder'):
+def reference_encoder(inputs, filters, kernel_size, strides, encoder_cell, is_training, scope):
   with tf.variable_scope(scope):
     ref_outputs = tf.expand_dims(inputs,axis=-1)
     # CNN stack
@@ -538,7 +538,7 @@ def shape_list(x):
 class Style_Emb_Disc:
 	"""Simple classifier for style embeddings
 	"""
-	def __init__(self, output_classes, scope=None):
+	def __init__(self, output_classes, scope):
 		"""
 		Args:
 			layers_sizes: list of integers, the length of the list represents the number of pre-net
@@ -548,7 +548,7 @@ class Style_Emb_Disc:
 		"""
 		super(Style_Emb_Disc, self).__init__()
 		self.output_classes = output_classes
-		self.scope = 'style_emb_disc_'+str(output_classes) if scope is None else scope
+		self.scope = scope
 
 	def __call__(self, inputs):
 		with tf.variable_scope(self.scope):

@@ -189,6 +189,10 @@ def train(log_dir, args, hparams):
 	step = 0
 	time_window = ValueWindow(100)
 	loss_window = ValueWindow(100)
+	loss_emt_window = ValueWindow(100)
+	loss_spk_window = ValueWindow(100)
+	loss_orthog_window = ValueWindow(100)
+
 	if args.emt_disc:
 		emt_disc_loss_window = ValueWindow(100)
 		emt_disc_acc_window = ValueWindow(100)
@@ -236,17 +240,24 @@ def train(log_dir, args, hparams):
 				if args.emt_disc:
 					step, loss, opt, emt_disc_loss, emt_disc_acc = sess.run([global_step, model.loss,model.optimize,model.emt_disc_loss,model.emt_disc_acc])
 				else:
-					step, loss, opt = sess.run([global_step, model.loss, model.optimize])
+					step, loss, opt, loss_emt, loss_spk, loss_orthog = sess.run([global_step, model.loss, model.optimize,
+																																			 model.style_emb_loss_emt,
+																																			 model.style_emb_loss_spk,
+																																			 model.style_emb_orthog_loss])
 				time_window.append(time.time() - start_time)
 				loss_window.append(loss)
+				loss_emt_window.append(loss_emt)
+				loss_spk_window.append(loss_spk)
+				loss_orthog_window.append(loss_orthog)
+
 				if args.emt_disc:
 					emt_disc_loss_window.append(emt_disc_loss)
 					emt_disc_acc_window.append(emt_disc_acc)
 					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.4f}, emt_disc_acc={:4.2f}%]'.format(
 						step, time_window.average, loss, loss_window.average, emt_disc_loss_window.average, emt_disc_acc_window.average*100)
 				else:
-					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
-						step, time_window.average, loss, loss_window.average)
+					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}]'.format(
+						step, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average)
 
 				log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
