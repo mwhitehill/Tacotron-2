@@ -116,7 +116,7 @@ def main():
 	parser.add_argument('--slack_url', default=None, help='slack webhook notification destination link')
 	parser.add_argument('--emt_disc', action='store_true', default=False, help='whether to use emotion discriminator as part of loss')
 	parser.add_argument('--spk_disc', action='store_true', default=False, help='whether to use speaker discriminator as part of loss')
-	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
+	parser.add_argument('--intercross', action='store_true', default=True, help='whether to use intercross training')
 	parser.add_argument('--synth_style_type', default=None, help='vary the emotion, speaker id, or neither')
 	args = parser.parse_args()
 

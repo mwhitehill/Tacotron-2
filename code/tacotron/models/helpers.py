@@ -154,11 +154,17 @@ def _teacher_forcing_ratio_decay(init_tfr, global_step, hparams):
 			alpha = hparams.tacotron_teacher_forcing_decay_alpha
 
 		#Compute natural cosine decay
-		tfr = tf.train.cosine_decay(init_tfr,
+		# tfr = tf.train.cosine_decay(init_tfr,
+		# 	global_step=global_step - hparams.tacotron_teacher_forcing_start_decay, #tfr ~= init at step 10k
+		# 	decay_steps=hparams.tacotron_teacher_forcing_decay_steps, #tfr ~= final at step ~40k
+		# 	alpha=alpha, #tfr = alpha% of init_tfr as final value
+		# 	name='tfr_cosine_decay')
+		#
+		tfr = tf.train.exponential_decay(init_tfr,
 			global_step=global_step - hparams.tacotron_teacher_forcing_start_decay, #tfr ~= init at step 10k
 			decay_steps=hparams.tacotron_teacher_forcing_decay_steps, #tfr ~= final at step ~40k
-			alpha=alpha, #tfr = alpha% of init_tfr as final value
-			name='tfr_cosine_decay')
+			decay_rate=hparams.tacotron_teacher_forcing_decay_exp_rate, #tfr = alpha% of init_tfr as final value
+			name='tfr_exponential_decay')
 
 		#force teacher forcing ratio to take initial value when global step < start decay step.
 		narrow_tfr = tf.cond(
