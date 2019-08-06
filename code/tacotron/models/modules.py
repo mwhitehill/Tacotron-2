@@ -1,24 +1,33 @@
 import tensorflow as tf
 
-def reference_encoder(inputs, filters, kernel_size, strides, encoder_cell, is_training, scope):
-  with tf.variable_scope(scope):
-    ref_outputs = tf.expand_dims(inputs,axis=-1)
-    # CNN stack
-    for i, channel in enumerate(filters):
-      ref_outputs = conv2d(ref_outputs, channel, kernel_size, strides, tf.nn.relu, is_training, 'conv2d_%d' % i)
+class reference_encoder:
+	def __init__(self, filters, kernel_size, strides, encoder_cell, is_training, scope):
+		self.filters = filters
+		self.kernel_size = kernel_size
+		self.strides = strides
+		self.encoder_cell = encoder_cell
+		self.is_training = is_training
+		self.scope = scope
 
-    shapes = shape_list(ref_outputs)
-    ref_outputs = tf.reshape(
-      ref_outputs,
-      shapes[:-2] + [shapes[2] * shapes[3]])
-    # RNN
-    encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
-      encoder_cell,
-      ref_outputs,
-      dtype=tf.float32)
+	def __call__(self, inputs):
+		with tf.variable_scope(self.scope):
+			ref_outputs = tf.expand_dims(inputs,axis=-1)
+			# CNN stack
+			for i, channel in enumerate(self.filters):
+				ref_outputs = conv2d(ref_outputs, channel, self.kernel_size, self.strides, tf.nn.relu, self.is_training, 'conv2d_%d' % i)
 
-    reference_state = tf.layers.dense(encoder_outputs[:,-1,:], 128, activation=tf.nn.tanh) # [N, 128]
-    return reference_state
+			shapes = shape_list(ref_outputs)
+			ref_outputs = tf.reshape(
+				ref_outputs,
+				shapes[:-2] + [shapes[2] * shapes[3]])
+			# RNN
+			encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+				self.encoder_cell,
+				ref_outputs,
+				dtype=tf.float32)
+
+			reference_state = tf.layers.dense(encoder_outputs[:,-1,:], 128, activation=tf.nn.tanh) # [N, 128]
+			return reference_state
 
 class HighwayNet:
 	def __init__(self, units, name=None):

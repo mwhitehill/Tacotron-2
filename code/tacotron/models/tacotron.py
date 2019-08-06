@@ -31,7 +31,8 @@ class Tacotron():
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None,
 								 targets_lengths=None, gta=False,global_step=None, is_training=False, is_evaluating=False,
 								 split_infos=None, emt_labels=None, spk_labels=None, spk_emb=None, ref_mel_emt = None, ref_mel_spk = None,
-								 use_emt_disc = False, use_spk_disc = False, use_intercross=False):
+								 ref_mel_emt_unp=None, ref_mel_spk_unp=None, use_emt_disc = False, use_spk_disc = False, use_intercross=False,
+								 use_unp=False):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -60,9 +61,7 @@ class Tacotron():
 		self.use_emt_disc = use_emt_disc
 		self.use_spk_disc = use_spk_disc
 		self.use_intercross = use_intercross
-
-		if not (use_intercross):
-			ref_mel = mel_targets
+		self.use_unp = use_unp
 
 		split_device = '/cpu:0' if self._hparams.tacotron_num_gpus > 1 or self._hparams.split_on_cpu else '/gpu:0'
 		with tf.device(split_device):
@@ -83,6 +82,9 @@ class Tacotron():
 
 			p_ref_mel_emt = tf.py_func(split_func, [ref_mel_emt, split_infos[:,5]], lout_float) if ref_mel_emt is not None else ref_mel_emt
 			p_ref_mel_spk = tf.py_func(split_func, [ref_mel_spk, split_infos[:, 6]],lout_float) if ref_mel_spk is not None else ref_mel_spk
+			if use_unp:
+				p_ref_mel_emt_unp = tf.py_func(split_func, [ref_mel_emt, split_infos[:,7]], lout_float) if ref_mel_emt_unp is not None else ref_mel_emt_unp
+				p_ref_mel_spk_unp = tf.py_func(split_func, [ref_mel_spk, split_infos[:, 8]],lout_float) if ref_mel_spk_unp is not None else ref_mel_spk_unp
 
 			tower_inputs = []
 			tower_mel_targets = []
@@ -91,6 +93,8 @@ class Tacotron():
 			tower_spk_emb = []
 			tower_ref_mel_emt = []
 			tower_ref_mel_spk = []
+			tower_ref_mel_emt_unp = []
+			tower_ref_mel_spk_unp = []
 
 			batch_size = tf.shape(inputs)[0]
 			mel_channels = hp.num_mels
@@ -109,6 +113,11 @@ class Tacotron():
 					tower_ref_mel_emt.append(tf.reshape(p_ref_mel_emt[i], [batch_size, -1, mel_channels]))
 				if p_ref_mel_spk is not None:
 					tower_ref_mel_spk.append(tf.reshape(p_ref_mel_spk[i], [batch_size, -1, mel_channels]))
+				if use_unp:
+					if p_ref_mel_emt_unp is not None:
+						tower_ref_mel_emt_unp.append(tf.reshape(p_ref_mel_emt_unp[i], [batch_size, -1, mel_channels]))
+					if p_ref_mel_spk_unp is not None:
+						tower_ref_mel_spk_unp.append(tf.reshape(p_ref_mel_spk_unp[i], [batch_size, -1, mel_channels]))
 
 		T2_output_range = (-hp.max_abs_value, hp.max_abs_value) if hp.symmetric_mels else (0, hp.max_abs_value)
 
@@ -116,6 +125,7 @@ class Tacotron():
 		self.tower_alignments = []
 		self.tower_stop_token_prediction = []
 		self.tower_mel_outputs = []
+		self.tower_mel_outputs_unp = []
 		self.tower_linear_outputs = []
 		self.tower_emt_disc_outputs = []
 		self.tower_refnet_out_emt = []
@@ -166,48 +176,65 @@ class Tacotron():
 
 					if tower_ref_mel_emt is not None and tower_ref_mel_spk is not None:
 						# Reference encoder
-						refnet_outputs_emt = reference_encoder(
-							tower_ref_mel_emt[i],
-							filters=hp.reference_filters,
-							kernel_size=(3, 3),
-							strides=(2, 2),
-							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
-							is_training=is_training,
-							scope='refnet_emt')  # [N, 128]
+						ref_encoder_emt = reference_encoder(filters=hp.reference_filters,kernel_size=(3, 3),
+																								strides=(2, 2), encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
+																								is_training=is_training, scope='refnet_emt')  # [N, 128]
+						refnet_outputs_emt = ref_encoder_emt(tower_ref_mel_emt[i])
 
-						refnet_outputs_spk = reference_encoder(
-							tower_ref_mel_spk[i],
-							filters=hp.reference_filters,
-							kernel_size=(3, 3),
-							strides=(2, 2),
-							encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
-							is_training=is_training,
-							scope='refnet_spk')  # [N, 128]
+
+						ref_encoder_spk = reference_encoder(filters=hp.reference_filters,kernel_size=(3, 3),
+																								strides=(2, 2), encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
+																								is_training=is_training, scope='refnet_emt')  # [N, 128]
+						refnet_outputs_spk = ref_encoder_spk(tower_ref_mel_spk[i])
+
+						if use_unp:
+							refnet_outputs_emt_unp = ref_encoder_emt(tower_ref_mel_emt_unp[i])
+							refnet_outputs_spk_unp = ref_encoder_spk(tower_ref_mel_spk_unp[i])
+
 
 						if hp.use_gst:
 							# Style attention
 							style_attention_emt = MultiheadAttention(
 								tf.expand_dims(refnet_outputs_emt, axis=1),  # [N, 1, 128]
 								tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])), # [N, hp.num_gst, 256/hp.num_heads]
-								num_heads=hp.num_heads,
-								num_units=hp.style_att_dim,
-								attention_type=hp.style_att_type)
+								num_heads=hp.num_heads,num_units=hp.style_att_dim,attention_type=hp.style_att_type)
 
 							style_embeddings_emt = style_attention_emt.multi_head_attention()
 
 							style_attention_spk = MultiheadAttention(
 								tf.expand_dims(refnet_outputs_spk, axis=1),  # [N, 1, 128]
 								tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])), # [N, hp.num_gst, 256/hp.num_heads]
-								num_heads=hp.num_heads,
-								num_units=hp.style_att_dim,
-								attention_type=hp.style_att_type)
+								num_heads=hp.num_heads,num_units=hp.style_att_dim,attention_type=hp.style_att_type)
 							style_embeddings_spk = style_attention_spk.multi_head_attention()
+
+							if use_unp:
+								style_attention_emt_unp = MultiheadAttention(
+									tf.expand_dims(refnet_outputs_emt_unp, axis=1),  # [N, 1, 128]
+									tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])),
+									# [N, hp.num_gst, 256/hp.num_heads]
+									num_heads=hp.num_heads, num_units=hp.style_att_dim, attention_type=hp.style_att_type)
+
+								style_attention_spk_unp = MultiheadAttention(
+									tf.expand_dims(refnet_outputs_spk_unp, axis=1),  # [N, 1, 128]
+									tf.tanh(tf.tile(tf.expand_dims(gst_tokens, axis=0), [batch_size, 1, 1])),
+									# [N, hp.num_gst, 256/hp.num_heads]
+									num_heads=hp.num_heads, num_units=hp.style_att_dim, attention_type=hp.style_att_type)
+								style_embeddings_emt_unp = style_attention_emt_unp.multi_head_attention()
+								style_embeddings_spk_unp = style_attention_spk_unp.multi_head_attention()
 
 						else:
 							style_embeddings_emt = tf.expand_dims(refnet_outputs_emt, axis=1)  # [N, 1, 128]
 							style_embeddings_spk = tf.expand_dims(refnet_outputs_spk, axis=1)  # [N, 1, 128]
 
+							if use_unp:
+								style_embeddings_emt_unp = tf.expand_dims(refnet_outputs_emt_unp, axis=1)  # [N, 1, 128]
+								style_embeddings_spk_unp = tf.expand_dims(refnet_outputs_spk_unp, axis=1)  # [N, 1, 128]
+
+
 						style_embeddings = tf.concat([style_embeddings_emt, style_embeddings_spk], axis=-1)
+
+						if use_unp:
+							style_embeddings_unp = tf.concat([style_embeddings_emt_unp, style_embeddings_spk_unp], axis=-1)
 
 					#no reference mel spec provided so just use random
 					else:
@@ -215,11 +242,15 @@ class Tacotron():
 						random_weights = tf.random_uniform([hp.num_heads, hp.num_gst], maxval=1.0, dtype=tf.float32)
 						random_weights = tf.nn.softmax(random_weights, name="random_weights")
 						style_embeddings = tf.matmul(random_weights, tf.nn.tanh(gst_tokens))
-						style_embeddings = tf.reshape(style_embeddings,
-																					[1, 1] + [hp.num_heads * gst_tokens.get_shape().as_list()[1]])
+						style_embeddings = tf.reshape(style_embeddings,[1, 1] + [hp.num_heads * gst_tokens.get_shape().as_list()[1]])
 
 					#just simply concatenate the style embeddings to encoder embeddings
 					if hp.tacotron_se_concat:
+
+						if use_unp:
+							style_embeddings_unp = tf.tile(style_embeddings_unp, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
+							encoder_outputs_unp = tf.concat([encoder_outputs, style_embeddings_unp],axis=-1)
+
 						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
 						encoder_outputs = tf.concat([encoder_outputs, style_embeddings],axis=-1)
 
@@ -229,21 +260,41 @@ class Tacotron():
 						# Preserves effect of both style and encoder_outputs.
 						# Skip if the shapes already match (should match if using 2 style embeddings)
 						if shape_list(style_embeddings)[-1] != shape_list(encoder_outputs)[-1]:
+
 							neg = tf.add(style_embeddings, tf.negative(style_embeddings))
 							style_embeddings = tf.concat([style_embeddings, neg], axis=-1)
+
+							if use_unp:
+								neg_unp = tf.add(style_embeddings_unp, tf.negative(style_embeddings_unp))
+								style_embeddings_unp = tf.concat([style_embeddings_unp, neg_unp], axis=-1)
+
+						# Add style embedding to every text encoder state for unpaired
+						if use_unp:
+							style_embeddings_unp = tf.tile(style_embeddings_unp, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
+							encoder_outputs_unp = tf.add(encoder_outputs, style_embeddings_unp)
 
 						# Add style embedding to every text encoder state
 						style_embeddings = tf.tile(style_embeddings, [1, shape_list(encoder_outputs)[1], 1])  # [N, T_in, 128]
 						encoder_outputs = tf.add(encoder_outputs, style_embeddings)
+
 
 					if hp.tacotron_use_style_emb_disc:
 						style_emb_disc_emt = Style_Emb_Disc(self._hparams.tacotron_n_emt,scope='style_disc_emt')
 						style_emb_disc_spk = Style_Emb_Disc(self._hparams.tacotron_n_spk,scope='style_disc_spk')
 						style_emb_logit_emt = style_emb_disc_emt(style_embeddings_emt)
 						style_emb_logit_spk = style_emb_disc_spk(style_embeddings_spk)
+						if use_unp:
+							style_emb_logit_emt_unp = style_emb_disc_emt(style_embeddings_emt_unp)
+							style_emb_logit_spk_unp = style_emb_disc_spk(style_embeddings_spk_unp)
 					else:
 						style_emb_logit_emt = tf.zeros(1)
 						style_emb_logit_spk = tf.zeros(1)
+						if use_unp:
+							style_emb_logit_emt_unp = tf.zeros(1)
+							style_emb_logit_spk_unp = tf.zeros(1)
+
+					if not use_unp:
+						encoder_outputs_unp = tf.identity(encoder_outputs)
 
 				#Decoder Parts
 					#Attention Decoder Prenet
@@ -262,16 +313,43 @@ class Tacotron():
 
 
 					#Decoder Cell ==> [batch_size, decoder_steps, num_mels * r] (after decoding)
-					decoder_cell = TacotronDecoderCell(
-						prenet,
-						attention_mechanism,
-						decoder_lstm,
-						frame_projection,
-						stop_projection)
+					decoder_cell = TacotronDecoderCell(prenet, attention_mechanism, decoder_lstm, frame_projection, stop_projection)
 
+					# prenet_unp = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
+					# #Attention Mechanism
+					# attention_mechanism_unp = LocationSensitiveAttention(hp.attention_dim, encoder_outputs_unp, hparams=hp, is_training=is_training,
+					# 	mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(tower_input_lengths[i], [-1]), smoothing=hp.smoothing,
+					# 	cumulate_weights=hp.cumulative_weights)
+					# #Decoder LSTM Cells
+					# decoder_lstm_unp = DecoderRNN(is_training, layers=hp.decoder_layers,
+					# 	size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
+					# #Frames Projection layer
+					# frame_projection_unp = FrameProjection(hp.num_mels * hp.outputs_per_step, scope='linear_transform_projection')
+					# #<stop_token> projection layer
+					# stop_projection_unp = StopProjection(is_training or is_evaluating, shape=hp.outputs_per_step, scope='stop_token_projection')
+					# decoder_cell_unp = TacotronDecoderCell(prenet_unp, attention_mechanism_unp, decoder_lstm_unp, frame_projection_unp, stop_projection_unp)
+
+					if use_unp:
+						# prenet_unp = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
+						#Attention Mechanism
+						attention_mechanism_unp = LocationSensitiveAttention(hp.attention_dim, encoder_outputs_unp, hparams=hp, is_training=is_training,
+							mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(tower_input_lengths[i], [-1]), smoothing=hp.smoothing,
+							cumulate_weights=hp.cumulative_weights)
+						# #Decoder LSTM Cells
+						# decoder_lstm_unp = DecoderRNN(is_training, layers=hp.decoder_layers,
+						# 	size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
+						#Frames Projection layer
+						# frame_projection_unp = FrameProjection(hp.num_mels * hp.outputs_per_step, scope='linear_transform_projection')
+						# #<stop_token> projection layer
+						# stop_projection_unp = StopProjection(is_training or is_evaluating, shape=hp.outputs_per_step, scope='stop_token_projection')
+						# decoder_cell_unp = TacotronDecoderCell(prenet_unp, attention_mechanism_unp, decoder_lstm_unp, frame_projection_unp, stop_projection_unp)
+						decoder_cell_unp = TacotronDecoderCell(prenet, attention_mechanism_unp, decoder_lstm,
+																									 frame_projection, stop_projection)
 
 					#Define the helper for our decoder
-					if is_training or is_evaluating or gta:
+					#when using the unpaired samples, we don't have ground truth, so can't use the training helper which allows
+					#teacher-forcing training
+					if (is_training or is_evaluating or gta) and not use_unp:
 						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
 					else:
 						self.helper = TacoTestHelper(batch_size, hp)
@@ -279,6 +357,8 @@ class Tacotron():
 
 					#initial decoder state
 					decoder_init_state = decoder_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+					if use_unp:
+						decoder_init_state_unp = decoder_cell_unp.zero_state(batch_size=batch_size, dtype=tf.float32)
 
 					#Only use max iterations at synthesis time
 					max_iters = hp.max_iters if not (is_training or is_evaluating) else None
@@ -286,40 +366,64 @@ class Tacotron():
 					#Decode
 					if use_emt_disc and use_spk_disc:
 						custom_decoder = CustomDecoder(decoder_cell, self.helper, decoder_init_state, tower_spk_emb[i], tower_emt_labels[i])
+						# custom_decoder_unp = CustomDecoder(decoder_cell, self.helper, decoder_init_state, tower_spk_emb[i],tower_emt_labels[i])
 					else:
 						custom_decoder = CustomDecoder(decoder_cell, self.helper, decoder_init_state)
+						if use_unp:
+							custom_decoder_unp = CustomDecoder(decoder_cell_unp, self.helper, decoder_init_state_unp)
 
 					(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(custom_decoder,
 						impute_finished=False,
 						maximum_iterations=max_iters,
 						swap_memory=hp.tacotron_swap_with_cpu)
 
+					if use_unp:
+
+						(frames_prediction_unp, stop_token_prediction_unp, _), final_decoder_state_unp, _ = dynamic_decode(custom_decoder_unp,
+							impute_finished=False,
+							maximum_iterations=max_iters,
+							swap_memory=hp.tacotron_swap_with_cpu)
 
 					# Reshape outputs to be one output per entry 
 					#==> [batch_size, non_reduced_decoder_steps (decoder_steps * r), num_mels]
 					decoder_output = tf.reshape(frames_prediction, [batch_size, -1, hp.num_mels])
 					stop_token_prediction = tf.reshape(stop_token_prediction, [batch_size, -1])
 
+					if use_unp:
+						decoder_output_unp = tf.reshape(frames_prediction_unp, [batch_size, -1, hp.num_mels])
+
 					if hp.clip_outputs:
-							decoder_output = tf.minimum(tf.maximum(decoder_output, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+							decoder_output = tf.minimum(tf.maximum(decoder_output, T2_output_range[0] - hp.lower_bound_decay),T2_output_range[1])
+							if use_unp:
+								decoder_output_unp = tf.minimum(tf.maximum(decoder_output_unp, T2_output_range[0] - hp.lower_bound_decay),
+																					T2_output_range[1])
 
 					#Postnet
 					postnet = Postnet(is_training, hparams=hp, scope='postnet_convolutions')
 
 					#Compute residual using post-net ==> [batch_size, decoder_steps * r, postnet_channels]
 					residual = postnet(decoder_output)
+					if use_unp:
+						residual_unp = postnet(decoder_output_unp)
 
 					#Project residual to same dimension as mel spectrogram 
 					#==> [batch_size, decoder_steps * r, num_mels]
 					residual_projection = FrameProjection(hp.num_mels, scope='postnet_projection')
 					projected_residual = residual_projection(residual)
+					if use_unp:
+						projected_residual_unp = residual_projection(residual_unp)
 
 
 					#Compute the mel spectrogram
 					mel_outputs = decoder_output + projected_residual
+					if use_unp:
+						mel_outputs_unp = decoder_output_unp + projected_residual_unp
 
 					if hp.clip_outputs:
 							mel_outputs = tf.minimum(tf.maximum(mel_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+							if use_unp:
+								mel_outputs_unp = tf.minimum(tf.maximum(mel_outputs_unp, T2_output_range[0] - hp.lower_bound_decay),
+																			 T2_output_range[1])
 
 					if post_condition:
 						# Add post-processing CBHG. This does a great job at extracting features from mels before projection to Linear specs.
@@ -354,6 +458,8 @@ class Tacotron():
 					self.tower_style_embeddings.append(style_embeddings)
 					self.tower_stop_token_prediction.append(stop_token_prediction)
 					self.tower_mel_outputs.append(mel_outputs)
+					if use_unp:
+						self.tower_mel_outputs_unp.append(mel_outputs_unp)
 					self.tower_style_emb_logit_emt.append(style_emb_logit_emt)
 					self.tower_style_emb_logit_spk.append(style_emb_logit_spk)
 					tower_embedded_inputs.append(embedded_inputs)
@@ -367,7 +473,7 @@ class Tacotron():
 			log('initialisation done {}'.format(gpus[i]))
 
 
-		if is_training:
+		if is_training and not use_unp:
 			self.ratio = self.helper._ratio
 		self.tower_inputs = tower_inputs
 		self.tower_input_lengths = tower_input_lengths
@@ -448,6 +554,11 @@ class Tacotron():
 						# Compute loss after postnet
 						after = MaskedMSE(self.tower_mel_targets[i], self.tower_mel_outputs[i], self.tower_targets_lengths[i],
 							hparams=self._hparams)
+						if self.use_unp:
+							after_2 = MaskedMSE(self.tower_mel_targets[i], self.tower_mel_outputs_unp[i], self.tower_targets_lengths[i],
+																hparams=self._hparams)
+						else:
+							after_2 = 0
 						#Compute <stop_token> loss (for learning dynamic generation stop)
 						stop_token_loss = MaskedSigmoidCrossEntropy(self.tower_stop_token_targets[i],
 							self.tower_stop_token_prediction[i], self.tower_targets_lengths[i], hparams=self._hparams)
@@ -463,6 +574,10 @@ class Tacotron():
 						before = tf.losses.mean_squared_error(self.tower_mel_targets[i], self.tower_decoder_output[i])
 						# Compute loss after postnet
 						after = tf.losses.mean_squared_error(self.tower_mel_targets[i], self.tower_mel_outputs[i])
+						if self.use_unp:
+							after_2 = tf.losses.mean_squared_error(self.tower_mel_targets[i], self.tower_mel_outputs_unp[i])
+						else:
+							after_2 = 0
 						#Compute <stop_token> loss (for learning dynamic generation stop)
 						stop_token_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
 							labels=self.tower_stop_token_targets[i],
@@ -530,7 +645,7 @@ class Tacotron():
 					self.tower_emt_disc_loss.append(emt_disc_loss)
 					self.tower_style_emb_orthog_loss.append(style_emb_orthog_loss)
 
-					tower_loss = before + after + stop_token_loss + regularization + linear_loss + emt_disc_loss + style_emb_loss_emt + style_emb_loss_spk + style_emb_orthog_loss
+					tower_loss = before + after + after_2 + stop_token_loss + regularization + linear_loss + emt_disc_loss + style_emb_loss_emt + style_emb_loss_spk + style_emb_orthog_loss
 					self.tower_loss.append(tower_loss)
 
 					self.tower_emt_disc_acc.append(emt_disc_acc)
@@ -602,7 +717,8 @@ class Tacotron():
 			for grad_and_vars in zip(*tower_gradients):
 				# each_grads_vars = ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
 				grads = []
-				for g,_ in grad_and_vars:
+				for g,v in grad_and_vars:
+					print(g, v)
 					expanded_g = tf.expand_dims(g, 0)
 					# Append on a 'tower' dimension which we will average over below.
 					grads.append(expanded_g)

@@ -218,8 +218,8 @@ def test():
 
 
 	#set manually
-	model_suffix = '2conds_disc_orthog'
-	args.mode = 'style_embs' #'synthesis'
+	model_suffix = '2conds_disc_orthog_tfr'
+	args.mode = 'synthesis' #'style_embs' #'synthesis'
 
 	#MODEL SETTINGS
 	concat = True

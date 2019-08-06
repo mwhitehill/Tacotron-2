@@ -17,9 +17,9 @@ from sklearn.model_selection import train_test_split
 from tacotron.utils.text import text_to_sequence
 from hparams import hparams
 
-_batches_per_group = 64
-test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
-			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
+_batches_per_group = 2#64
+test_size = 64#(hparams.tacotron_test_size if hparams.tacotron_test_size is not None
+			#else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 
 def get_metadata_df(path):
 
@@ -110,14 +110,18 @@ class Feeder:
       tf.placeholder(tf.int32, shape=(None,), name='spk_labels'),
 			tf.placeholder(tf.float32, shape=(None, hparams.tacotron_num_gpus*hparams.tacotron_spk_emb_dim), name='spk_emb'),
 			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel_emt'),
-			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel_spk')
+			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel_spk'),
+			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel_emt_unp'),
+			tf.placeholder(tf.float32, shape=(None, None, hparams.num_mels), name='ref_mel_spk_unp')
 			]
 
 			# Create queue for buffering data
-			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32, tf.float32, tf.float32], name='input_queue')
+			queue = tf.FIFOQueue(8, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32,
+															 tf.int32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32], name='input_queue')
 			self._enqueue_op = queue.enqueue(self._placeholders)
 			self.inputs, self.input_lengths, self.mel_targets, self.token_targets, self.linear_targets, self.targets_lengths,\
-				self.split_infos, self.emt_labels, self.spk_labels, self.spk_emb, self.ref_mel_emt, self.ref_mel_spk = queue.dequeue()
+				self.split_infos, self.emt_labels, self.spk_labels, self.spk_emb, self.ref_mel_emt, self.ref_mel_spk,\
+				self.ref_mel_emt_unp, self.ref_mel_spk_unp= queue.dequeue()
 
 			self.inputs.set_shape(self._placeholders[0].shape)
 			self.input_lengths.set_shape(self._placeholders[1].shape)
@@ -131,6 +135,8 @@ class Feeder:
 			self.spk_emb.set_shape(self._placeholders[9].shape)
 			self.ref_mel_emt.set_shape(self._placeholders[10].shape)
 			self.ref_mel_spk.set_shape(self._placeholders[11].shape)
+			self.ref_mel_emt_unp.set_shape(self._placeholders[10].shape)
+			self.ref_mel_spk_unp.set_shape(self._placeholders[11].shape)
 
 			# Create eval queue for buffering eval data
 			eval_queue = tf.FIFOQueue(1, [tf.int32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.float32, tf.float32, tf.float32], name='eval_queue')
@@ -197,7 +203,12 @@ class Feeder:
 		ref_mel_emt = mel_target
 		ref_mel_spk = mel_target
 
-		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
+		#won't use unpaired so just set to zeros
+		ref_mel_emt_unp = np.zeros((1,hparams.num_mels))
+		ref_mel_spk_unp = np.zeros((1,hparams.num_mels))
+
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk,
+						ref_mel_emt_unp, ref_mel_spk_unp,len(mel_target))
 
 	def make_test_batches(self):
 		start = time.time()
@@ -285,10 +296,12 @@ class Feeder:
 
 		ref_mel_emt = np.zeros((1,hparams.num_mels))
 		ref_mel_spk = np.zeros((1,hparams.num_mels))
+		ref_mel_emt_unp = np.zeros((1,hparams.num_mels))
+		ref_mel_spk_unp = np.zeros((1,hparams.num_mels))
 
 		if self._args.intercross:
 			if dataset == 'emt4': #np.random.choice(['emt','spk']) == 'emt':
-				ref_mel_spk = mel_target
+
 				# find all mels with same emotion type
 				df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == dataset]
 				df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == int(emt_label)]
@@ -296,10 +309,19 @@ class Feeder:
 				# select one mel from same style to use as reference
 				idx = np.random.choice(df_meta_same_style.index)
 				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
-				ref_mel_emt = np.load(os.path.join(self.data_folder, dataset, 'mels', mel_name))
+				ref_mel_emt = np.load(os.path.join(self.data_folder, 'emt4', 'mels', mel_name))
+				ref_mel_spk = mel_target
+
+				if self._args.unpaired:
+					#pick random mel from a different speaker for unpaired sample
+					df_meta_diff_style = df_meta[df_meta.loc[:, 'spk_label'] != spk_label]
+					idx = np.random.choice(df_meta_diff_style.index)
+					mel_name = df_meta_diff_style.loc[idx, 'mel_filename']
+					ref_mel_spk_unp = np.load(os.path.join(self.data_folder, 'librispeech', 'mels', mel_name))
+					ref_mel_ent_unp = mel_target
 
 			elif dataset == 'librispeech':
-				ref_mel_emt = mel_target
+
 				# find all mels with same spk type
 				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
 
@@ -307,10 +329,20 @@ class Feeder:
 				idx = np.random.choice(df_meta_same_style.index)
 				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
 				ref_mel_spk = np.load(os.path.join(self.data_folder,dataset,'mels', mel_name))
+				ref_mel_emt = mel_target
+
+				if self._args.unpaired:
+					#pick random mel from a different emotion for unpaired sample
+					df_meta_diff_style = df_meta[df_meta.loc[:, 'emt_label'] != emt_label]
+					idx = np.random.choice(df_meta_diff_style.index)
+					mel_name = df_meta_diff_style.loc[idx, 'mel_filename']
+					ref_mel_emt_unp = np.load(os.path.join(self.data_folder, 'emt4', 'mels', mel_name))
+					ref_mel_spk_unp = mel_target
+
 			else:
 				raise ValueError('Invalid dataset type')
 
-		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
+		return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, ref_mel_emt_unp, ref_mel_spk_unp, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):
 		assert 0 == len(batches) % self._hparams.tacotron_num_gpus
@@ -325,10 +357,12 @@ class Feeder:
 		split_infos = []
 		mel_refs_emt = None
 		mel_refs_spk = None
+		mel_refs_emt_unp = None
+		mel_refs_spk_unp = None
 
 		targets_lengths = np.asarray([x[-1] for x in batches], dtype=np.int32) #Used to mask loss
-		spk_labels = np.asarray([x[-4] for x in batches], dtype=np.int32)
-		emt_labels = np.asarray([x[-5] for x in batches], dtype = np.int32)
+		spk_labels = np.asarray([x[-6] for x in batches], dtype=np.int32)
+		emt_labels = np.asarray([x[-7] for x in batches], dtype = np.int32)
 		input_lengths = np.asarray([len(x[0]) for x in batches], dtype=np.int32)
 
 		#Produce inputs/targets of variables lengths for different GPUs
@@ -349,17 +383,25 @@ class Feeder:
 			spk_emb_cur_device = np.stack([x[4] for x in batch])
 			spk_embs = np.concatenate((spk_embs, spk_emb_cur_device), axis=1) if spk_embs is not None else spk_emb_cur_device
 
-			mel_refs_emt_cur_device, mel_refs_emt_max_len = self._prepare_targets([x[-3] for x in batch], outputs_per_step)
+			mel_refs_emt_cur_device, mel_refs_emt_max_len = self._prepare_targets([x[-5] for x in batch], outputs_per_step)
 			mel_refs_emt = np.concatenate(( mel_refs_emt, mel_refs_emt_cur_device), axis=1) if mel_refs_emt is not None else mel_refs_emt_cur_device
 
-			mel_refs_spk_cur_device, mel_refs_spk_max_len = self._prepare_targets([x[-2] for x in batch], outputs_per_step)
+			mel_refs_spk_cur_device, mel_refs_spk_max_len = self._prepare_targets([x[-4] for x in batch], outputs_per_step)
 			mel_refs_spk = np.concatenate(( mel_refs_spk, mel_refs_spk_cur_device), axis=1) if mel_refs_spk is not None else mel_refs_spk_cur_device
 
+			mel_refs_emt_unp_cur_device, mel_refs_emt_unp_max_len = self._prepare_targets([x[-3] for x in batch], outputs_per_step)
+			mel_refs_emt_unp = np.concatenate(( mel_refs_emt_unp, mel_refs_emt_unp_cur_device), axis=1) if mel_refs_emt_unp is not None else mel_refs_emt_unp_cur_device
+
+			mel_refs_spk_unp_cur_device, mel_refs_spk_unp_max_len = self._prepare_targets([x[-2] for x in batch], outputs_per_step)
+			mel_refs_spk_unp = np.concatenate(( mel_refs_spk_unp, mel_refs_spk_unp_cur_device), axis=1) if mel_refs_spk_unp is not None else mel_refs_spk_unp_cur_device
+
 			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len,
-													hparams.tacotron_spk_emb_dim, mel_refs_emt_max_len, mel_refs_spk_max_len])
+													hparams.tacotron_spk_emb_dim, mel_refs_emt_max_len, mel_refs_spk_max_len,
+													mel_refs_emt_unp_max_len, mel_refs_spk_unp_max_len])
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
-		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels, spk_labels, spk_embs, mel_refs_emt, mel_refs_spk)
+		return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels,
+						spk_labels, spk_embs, mel_refs_emt, mel_refs_spk, mel_refs_emt_unp, mel_refs_spk_unp)
 
 	def _prepare_inputs(self, inputs):
 		max_len = max([len(x) for x in inputs])
