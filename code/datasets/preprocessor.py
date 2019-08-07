@@ -142,11 +142,11 @@ def _process_utterance(dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, ind
 	# 	return None
 
 	#Compute the linear scale spectrogram from the audui
-	linear_spectrogram = audio.linearspectrogram(preem_aud, hparams).astype(np.float32)
-	linear_frames = linear_spectrogram.shape[1]
+	# linear_spectrogram = audio.linearspectrogram(preem_aud, hparams).astype(np.float32)
+	# linear_frames = linear_spectrogram.shape[1]
 
 	#sanity check
-	assert linear_frames == mel_frames
+	# assert linear_frames == mel_frames
 
 	if hparams.use_lws:
 		#Ensure time resolution adjustement between audio and mel-spectrogram
@@ -179,9 +179,9 @@ def _process_utterance(dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, ind
 	mel_filename = 'mel-{}.npy'.format(index)
 	linear_filename = 'linear-{}.npy'.format(index)
 	spk_emb_filename = 'spkemb-{}.npy'.format(index)
-	np.save(os.path.join(audio_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
+	# np.save(os.path.join(audio_dir, audio_filename), out.astype(out_dtype), allow_pickle=False)
 	np.save(os.path.join(mel_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
-	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
+	# np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
 	#np.save(os.path.join(spk_emb_dir, spk_emb_filename), spk_emb, allow_pickle=False)
 
 	basename = os.path.basename(audio_path)

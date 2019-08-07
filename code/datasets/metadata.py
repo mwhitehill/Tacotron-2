@@ -1,7 +1,13 @@
 import os
 import pandas as pd
+import numpy as np
+import librosa
+if __name__ == '__main__':
+	import sys
+	sys.path.append(os.getcwd())
+from datasets import audio
 
-folder_data = os.path.join(os.path.dirname(os.path.dirname(os.getcwd())), 'data')
+folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
 
 def create_metadata_emt4():
 
@@ -90,8 +96,62 @@ def create_metadata_librispeech():
   df_metadata_path = os.path.join(folder_data, 'metadata_librispeech.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
+def create_metadata_vctk():
+
+  folder = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\VCTK-Corpus'
+  folder_wav = os.path.join(folder,'wav48')
+  folder_data_vctk = os.path.join(folder_data, 'vctk')
+  os.makedirs(folder_data_vctk,exist_ok=True)
+
+  #manually created this csv file because the original was really dumb!
+  meta_speakers_path = os.path.join(folder, 'speaker-info.csv')
+  df_speakers = pd.read_csv(meta_speakers_path,index_col=0)
+
+  columns = ['path', 'script', 'emt_label', 'spk_id', 'sex','accent','region']
+  df_metadata = pd.DataFrame([],columns=columns)
+  emt_label=0
+  cnt=0
+  for i,(root, dirs, files) in enumerate(os.walk(folder_wav, topdown=True)):
+    if not(files): #check not empty
+      continue
+
+    spk_name = os.path.basename(root)
+    spk_id = int(spk_name[1:])
+
+    try:
+      row = df_speakers.loc[spk_id].values
+      sex = row[1]
+      accent = row[2]
+      region = row[3]
+    except:
+      sex = 'N'
+      accent = 'NA'
+      region = 'NA'
+
+    audio_files = [f for f in files if f.endswith('.wav') or f.endswith('.flac')]
+
+    for f in audio_files:
+      cnt+=1
+      fname = f.split('.')[0]
+      path = os.path.join('wav48', spk_name,f)
+      script_path = os.path.join(folder,'txt', spk_name,fname+'.txt')
+      try:
+        with open(script_path) as f:
+          script = f.read()
+      except:
+        print("couldn't find txt for", fname,"- skipping")
+
+      df_metadata = df_metadata.append(
+        pd.DataFrame([[path.replace('\\', '/'), script[:-1], emt_label, spk_id, sex,accent,region]], columns=columns),
+        ignore_index=True)
+    print("finished", spk_name)
+
+  df_metadata_path = os.path.join(folder_data, 'metadata_vctk.txt')
+  df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
+
 if __name__ == '__main__':
-  create_metadata_librispeech()
+  create_metadata_vctk()
+  # create_metadata_librispeech()
   # create_metadata_emt4()
 
 

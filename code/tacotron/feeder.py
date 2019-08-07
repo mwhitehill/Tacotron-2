@@ -298,7 +298,7 @@ class Feeder:
 				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
 				ref_mel_emt = np.load(os.path.join(self.data_folder, dataset, 'mels', mel_name))
 
-			elif dataset == 'librispeech':
+			elif dataset == 'librispeech' or 'vctk':
 				ref_mel_emt = mel_target
 				# find all mels with same spk type
 				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]

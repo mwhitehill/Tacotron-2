@@ -42,7 +42,7 @@ def norm_data(args):
 
 	print('Selecting data folders..')
 	# supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'M-AILABS']
-	supported_datasets = ['emt4','librispeech']
+	supported_datasets = ['emt4','librispeech','vctk']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
@@ -51,6 +51,8 @@ def norm_data(args):
 		return('Zo/Wav')
 	elif args.dataset == 'librispeech':
 		return ('LibriSpeech/train-clean-100')
+	elif args.dataset == 'vctk':
+		return ('')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
