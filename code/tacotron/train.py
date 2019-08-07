@@ -87,13 +87,13 @@ def model_train_mode(args, feeder, hparams, global_step):
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
 				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross)
+				use_intercross=args.intercross, use_unp = args.unpaired)
 		else:
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
 				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross)
+				use_intercross=args.intercross, use_unp = args.unpaired)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)

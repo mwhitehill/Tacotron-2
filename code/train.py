@@ -118,6 +118,7 @@ def main():
 	parser.add_argument('--spk_disc', action='store_true', default=False, help='whether to use speaker discriminator as part of loss')
 	parser.add_argument('--intercross', action='store_true', default=True, help='whether to use intercross training')
 	parser.add_argument('--synth_style_type', default=None, help='vary the emotion, speaker id, or neither')
+	parser.add_argument('--unpaired', action='store_true', default=False, help='whether to use unpaired samples during training')
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']

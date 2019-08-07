@@ -554,3 +554,19 @@ class Style_Emb_Disc:
 		with tf.variable_scope(self.scope):
 				logit = tf.layers.dense(inputs, self.output_classes)
 		return logit
+
+class Unpaired_Disc:
+	"""
+	Distringuishes between paired or unpaired generated samples
+	"""
+	def __init__(self, hp, is_training):
+		super(Unpaired_Disc, self).__init__()
+		self.hp = hp
+		self.is_training = is_training
+
+	def __call__(self, inputs):
+		unp_enc_out = reference_encoder(inputs, filters=self.hp.reference_filters, kernel_size=(3, 3), strides=(2, 2),
+																encoder_cell=tf.nn.rnn_cell.GRUCell(self.hp.reference_depth), is_training=self.is_training,
+																scope='unp_disc')
+		logit = tf.layers.dense(unp_enc_out, 2)
+		return logit

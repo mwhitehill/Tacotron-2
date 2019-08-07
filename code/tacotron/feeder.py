@@ -224,7 +224,7 @@ class Feeder:
 			# Read a group of examples
 			n = self._hparams.tacotron_batch_size
 			r = self._hparams.outputs_per_step
-			examples = [self._get_next_example() for i in range(n * _batches_per_group)]
+			examples = [self._get_next_example(i) for i in range(n * _batches_per_group)]
 
 			# Bucket examples based on similar output sequence length for efficiency
 			examples.sort(key=lambda x: x[-1])
@@ -244,12 +244,15 @@ class Feeder:
 				feed_dict = dict(zip(self._placeholders, self._prepare_batch(batch, r)))
 				self._session.run(self._eval_enqueue_op, feed_dict=feed_dict)
 
-	def _get_next_example(self):
+	def _get_next_example(self, i):
 		"""Gets a single example (input, mel_target, token_target, linear_target, mel_length) from_ disk
 		"""
 		if self._train_offset >= len(self._train_meta):
 			self._train_offset = 0
 			np.random.shuffle(self._train_meta)
+
+		#if using unpaired, the second half of samples in batch will be the unpaired samples
+		unpaired = True if self._args.unpaired and i % self._hparams.tacotron_batch_size >= (self._hparams.tacotron_batch_size//2) else False
 
 		meta = self._train_meta[self._train_offset]
 		self._train_offset += 1
@@ -287,26 +290,62 @@ class Feeder:
 		ref_mel_spk = np.zeros((1,hparams.num_mels))
 
 		if self._args.intercross:
-			if dataset == 'emt4': #np.random.choice(['emt','spk']) == 'emt':
-				ref_mel_spk = mel_target
-				# find all mels with same emotion type
-				df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == dataset]
-				df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == int(emt_label)]
+			if dataset == 'emt4':
+				if unpaired:
+					#for unpaired, we'll pick a random emotion reference and a speaker embedding from the other dataset
+					#start with random emotion reference
+					df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == 'emt4']
+					idx = np.random.choice(df_meta_same_style.index)
+					mel_name = df_meta_same_style.loc[idx, 'mel_filename']
+					ref_mel_emt = np.load(os.path.join(self.data_folder, 'emt4', 'mels', mel_name))
+					#update emt_label
+					emt_label = df_meta_same_style.loc[idx, 'emt_label']
 
-				# select one mel from same style to use as reference
-				idx = np.random.choice(df_meta_same_style.index)
-				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
-				ref_mel_emt = np.load(os.path.join(self.data_folder, dataset, 'mels', mel_name))
+					#pick random speaker embedding from other dataset
+					df_meta_diff_style = df_meta[df_meta.loc[:, 'dataset'] == 'librispeech']
+					idx = np.random.choice(df_meta_diff_style.index)
+					mel_name = df_meta_diff_style.loc[idx, 'mel_filename']
+					ref_mel_spk = np.load(os.path.join(self.data_folder, 'librispeech', 'mels', mel_name))
+					#update spk_label
+					spk_label = df_meta_diff_style.loc[idx, 'spk_label']
+				else:
+					ref_mel_spk = mel_target
+					# find all mels with same emotion type
+					df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == dataset]
+					df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == int(emt_label)]
+
+					# select one mel from same style to use as reference
+					idx = np.random.choice(df_meta_same_style.index)
+					mel_name = df_meta_same_style.loc[idx, 'mel_filename']
+					ref_mel_emt = np.load(os.path.join(self.data_folder, dataset, 'mels', mel_name))
 
 			elif dataset == 'librispeech':
-				ref_mel_emt = mel_target
-				# find all mels with same spk type
-				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
+				if unpaired:
+					# for unpaired, we'll pick a random speaker reference and an emotion reference from the other dataset
+					# start with random speaker reference
+					df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == 'librispeech']
+					idx = np.random.choice(df_meta_same_style.index)
+					mel_name = df_meta_same_style.loc[idx, 'mel_filename']
+					ref_mel_spk = np.load(os.path.join(self.data_folder, 'librispeech', 'mels', mel_name))
+					# update emt_label
+					spk_label = df_meta_same_style.loc[idx, 'spk_label']
 
-				# select one mel from same style to use as reference
-				idx = np.random.choice(df_meta_same_style.index)
-				mel_name = df_meta_same_style.loc[idx, 'mel_filename']
-				ref_mel_spk = np.load(os.path.join(self.data_folder,dataset,'mels', mel_name))
+					# pick random emotion embedding from other dataset
+					df_meta_diff_style = df_meta[df_meta.loc[:, 'dataset'] == 'emt4']
+					idx = np.random.choice(df_meta_diff_style.index)
+					mel_name = df_meta_diff_style.loc[idx, 'mel_filename']
+					ref_mel_emt = np.load(os.path.join(self.data_folder, 'emt4', 'mels', mel_name))
+					# update emt_label
+					emt_label = df_meta_diff_style.loc[idx, 'emt_label']
+				else:
+					ref_mel_emt = mel_target
+					# find all mels with same spk type
+					df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
+
+					# select one mel from same style to use as reference
+					idx = np.random.choice(df_meta_same_style.index)
+					mel_name = df_meta_same_style.loc[idx, 'mel_filename']
+					ref_mel_spk = np.load(os.path.join(self.data_folder,dataset,'mels', mel_name))
 			else:
 				raise ValueError('Invalid dataset type')
 

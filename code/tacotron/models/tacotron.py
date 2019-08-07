@@ -31,7 +31,7 @@ class Tacotron():
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None,
 								 targets_lengths=None, gta=False,global_step=None, is_training=False, is_evaluating=False,
 								 split_infos=None, emt_labels=None, spk_labels=None, spk_emb=None, ref_mel_emt = None, ref_mel_spk = None,
-								 use_emt_disc = False, use_spk_disc = False, use_intercross=False):
+								 use_emt_disc = False, use_spk_disc = False, use_intercross=False, use_unp = False):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -60,9 +60,7 @@ class Tacotron():
 		self.use_emt_disc = use_emt_disc
 		self.use_spk_disc = use_spk_disc
 		self.use_intercross = use_intercross
-
-		if not (use_intercross):
-			ref_mel = mel_targets
+		self.use_unp = use_unp
 
 		split_device = '/cpu:0' if self._hparams.tacotron_num_gpus > 1 or self._hparams.split_on_cpu else '/gpu:0'
 		with tf.device(split_device):
@@ -123,6 +121,11 @@ class Tacotron():
 		self.tower_style_embeddings = []
 		self.tower_style_emb_logit_emt = []
 		self.tower_style_emb_logit_spk = []
+
+		#unpaired vars
+		self.tower_unp_disc_logit = []
+		self.tower_refnet_out_emt_unp = []
+		self.tower_refnet_out_spk_unp = []
 
 		tower_embedded_inputs = []
 		tower_enc_conv_output_shape = []
@@ -339,6 +342,23 @@ class Tacotron():
 						if hp.clip_outputs:
 							linear_outputs = tf.minimum(tf.maximum(linear_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
 
+
+					if use_unp:
+						# unpaired GAN discriminator
+						unp_disc = Unpaired_Disc(self._hparams, is_training)
+						unp_disc_logit = unp_disc(mel_outputs)
+
+						# get style embedding for unpaired (only unpaired) synthesized samples
+						unpaired_mels = mel_outputs[self._hparams.tacotron_batch_size//2:,:,:]
+						refnet_outputs_emt_unp = reference_encoder(unpaired_mels,filters=hp.reference_filters,kernel_size=(3, 3),
+																									 strides=(2, 2), encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth), is_training=is_training,
+																									 scope='refnet_emt')  # [N, 128]
+
+						refnet_outputs_spk_unp = reference_encoder(unpaired_mels,filters=hp.reference_filters,kernel_size=(3, 3),
+																											 strides=(2, 2),encoder_cell=tf.nn.rnn_cell.GRUCell(hp.reference_depth),
+																											 is_training=is_training,scope='refnet_spk')  # [N, 128]
+
+
 					#Emotion Discriminator
 					if use_emt_disc:
 						emt_disc = Emt_Disc(mel_outputs, is_training=is_training)
@@ -356,6 +376,9 @@ class Tacotron():
 					self.tower_mel_outputs.append(mel_outputs)
 					self.tower_style_emb_logit_emt.append(style_emb_logit_emt)
 					self.tower_style_emb_logit_spk.append(style_emb_logit_spk)
+					self.tower_unp_disc_logit.append(unp_disc_logit)
+					self.tower_refnet_out_emt_unp.append(refnet_outputs_emt_unp)
+					self.tower_refnet_out_spk_unp.append(refnet_outputs_spk_unp)
 					tower_embedded_inputs.append(embedded_inputs)
 					tower_enc_conv_output_shape.append(enc_conv_output_shape)
 					tower_encoder_outputs.append(encoder_outputs)
@@ -441,32 +464,41 @@ class Tacotron():
 		for i in range(hp.tacotron_num_gpus):
 			with tf.device(tf.train.replica_device_setter(ps_tasks=1, ps_device="/cpu:0", worker_device=gpus[i])):
 				with tf.variable_scope('loss') as scope:
+
+					half_size = self._hparams.tacotron_batch_size//2
+					mel_outputs = self.tower_mel_outputs[i][:half_size,:,:] if self.use_unp else self.tower_mel_outputs[i]
+					if self.use_unp:
+						mel_outputs_unp = self.tower_mel_outputs[i][half_size:, :, :]
+
+					mel_targets = self.tower_mel_targets[i][:half_size,:,:] if self.use_unp else self.tower_mel_targets[i]
+					decoder_out = self.tower_decoder_output[i][:half_size, :, :] if self.use_unp else self.tower_decoder_output[i]
+					target_lengths = self.tower_targets_lengths[i][:half_size, :, :] if self.use_unp else self.tower_targets_lengths[i]
+					stop_token_targets = self.tower_stop_token_targets[i][:half_size, :, :] if self.use_unp else self.tower_stop_token_targets[i]
+					stop_token_prediction= self.tower_stop_token_prediction[i][:half_size, :, :] if self.use_unp else self.tower_stop_token_prediction[i]
+
 					if hp.mask_decoder:
 						# Compute loss of predictions before postnet
-						before = MaskedMSE(self.tower_mel_targets[i], self.tower_decoder_output[i], self.tower_targets_lengths[i],
-							hparams=self._hparams)
+						before = MaskedMSE(mel_targets, decoder_out, target_lengths,hparams=self._hparams)
 						# Compute loss after postnet
-						after = MaskedMSE(self.tower_mel_targets[i], self.tower_mel_outputs[i], self.tower_targets_lengths[i],
-							hparams=self._hparams)
+						after = MaskedMSE(mel_targets, mel_outputs, target_lengths,hparams=self._hparams)
 						#Compute <stop_token> loss (for learning dynamic generation stop)
-						stop_token_loss = MaskedSigmoidCrossEntropy(self.tower_stop_token_targets[i],
-							self.tower_stop_token_prediction[i], self.tower_targets_lengths[i], hparams=self._hparams)
+						stop_token_loss = MaskedSigmoidCrossEntropy(stop_token_targets,stop_token_prediction, target_lengths, hparams=self._hparams)
 						#Compute masked linear loss
 						if hp.predict_linear:
-							#Compute Linear L1 mask loss (priority to low frequencies)
-							linear_loss = MaskedLinearLoss(self.tower_linear_targets[i], self.tower_linear_outputs[i],
-								self.targets_lengths, hparams=self._hparams)
+							raise ValueError('have not finished unpaired losses for predicting linear')
+							# #Compute Linear L1 mask loss (priority to low frequencies)
+							# linear_loss = MaskedLinearLoss(self.tower_linear_targets[i], self.tower_linear_outputs[i],
+							# 	self.targets_lengths, hparams=self._hparams)
 						else:
 							linear_loss=0.
 					else:
 						# Compute loss of predictions before postnet
-						before = tf.losses.mean_squared_error(self.tower_mel_targets[i], self.tower_decoder_output[i])
+						before = tf.losses.mean_squared_error(mel_targets, decoder_out)
 						# Compute loss after postnet
-						after = tf.losses.mean_squared_error(self.tower_mel_targets[i], self.tower_mel_outputs[i])
+						after = tf.losses.mean_squared_error(mel_targets, mel_outputs)
 						#Compute <stop_token> loss (for learning dynamic generation stop)
-						stop_token_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-							labels=self.tower_stop_token_targets[i],
-							logits=self.tower_stop_token_prediction[i]))
+						stop_token_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=stop_token_targets,
+																																										 logits=stop_token_prediction))
 
 						if hp.predict_linear:
 							#Compute linear loss
@@ -497,6 +529,17 @@ class Tacotron():
 						style_emb_orthog_loss = .02 * tf.norm(style_emb_orthog_loss) #paper uses squared frobenius, think mistake, just use frobenius
 					else:
 						style_emb_orthog_loss = 0
+
+					if self.use_unp:
+						#GAN loss
+						unpaired_labels = tf.concat([tf.constant([[1.0, 0.0]] * half_size),tf.constant([[0.0, 1.0]] * half_size)],axis=0)
+						unp_gan_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_unp_disc_logit, labels=unpaired_labels))
+
+						#Reference embeddings comparison - only for unpaired samples
+						refnet_outputs_emt = self.tower_refnet_out_emt[i][half_size:,:]
+						refnet_outputs_spk = self.tower_refnet_out_spk[i][half_size:,:]
+						l1_emt = tf.norm(refnet_outputs_emt - self.tower_refnet_out_emt_unp[i],ord=1)
+						l1_spk = tf.norm(refnet_outputs_spk - self.tower_refnet_out_spk_unp[i],ord=1)
 
 					if self.use_emt_disc:
 						emt_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_emt_labels[i]), 4)
