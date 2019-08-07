@@ -24,10 +24,10 @@ test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not Non
 def get_metadata_df(path):
 
 	# load metadata into a dataframe
-	columns = ['audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
+	columns = ['dataset','audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
 						 'emt_label', 'spk_label', 'basename']
 	meta_df = pd.read_csv(path, sep='|')
-	if len(meta_df.columns) == 11:
+	if len(meta_df.columns) == 12:
 		columns += ['sex']
 	meta_df.columns = columns
 	return(meta_df)
@@ -56,7 +56,7 @@ class Feeder:
 		with open(metadata_filename, encoding='utf-8') as f:
 			self._metadata = [line.strip().split('|') for line in f]
 			frame_shift_ms = hparams.hop_size / hparams.sample_rate
-			hours = sum([int(x[5]) for x in self._metadata]) * frame_shift_ms / (3600)
+			hours = sum([int(x[6]) for x in self._metadata]) * frame_shift_ms / (3600)
 			log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
 
 		self._metadata_df = get_metadata_df(metadata_filename)
@@ -169,18 +169,18 @@ class Feeder:
 		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'test']
 		self._test_offset += 1
 
-		text = meta[6]
-		emt_label = meta[7]
-		spk_label = meta[8]
+		text = meta[7]
+		emt_label = meta[8]
+		spk_label = meta[9]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+		mel_target = np.load(os.path.join(self._mel_dir, meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+		linear_target = np.load(os.path.join(self._linear_dir, meta[3]))
 
 		#check for speaker embedding
-		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		spk_emb_path = os.path.join(self._spk_emb_dir, meta[4])
 		if os.path.exists(spk_emb_path):
 			spk_emb = np.load(spk_emb_path)
 		else:
@@ -192,7 +192,7 @@ class Feeder:
 		ref_mel = np.zeros((1,80))
 
 		if self._args.intercross:
-			if True:#np.random.choice(['emt','spk']) == 'emt':
+			if False:#True:#np.random.choice(['emt','spk']) == 'emt':
 				ref_type = 1 #ref type 1 = change emt
 				#find all mels with same emotion type
 				df_meta_same_style = df_meta[df_meta.loc[:,'emt_label'] == int(emt_label)]
@@ -266,18 +266,18 @@ class Feeder:
 
 		df_meta = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'train']
 
-		text = meta[6]
-		emt_label = meta[7]
-		spk_label = meta[8]
+		text = meta[7]
+		emt_label = meta[8]
+		spk_label = meta[9]
 
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+		mel_target = np.load(os.path.join(self._mel_dir, meta[2]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+		linear_target = np.load(os.path.join(self._linear_dir, meta[3]))
 
 		#check for speaker embedding
-		spk_emb_path = os.path.join(self._spk_emb_dir, meta[3])
+		spk_emb_path = os.path.join(self._spk_emb_dir, meta[4])
 		if os.path.exists(spk_emb_path):
 			spk_emb = np.load(spk_emb_path)
 		else:
