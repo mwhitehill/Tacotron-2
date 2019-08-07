@@ -97,7 +97,7 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	with open(args.metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
-		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
+		hours = sum([int(x[5]) for x in metadata]) * frame_shift_ms / (3600)
 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
 
 	log('Starting Synthesis')
@@ -268,8 +268,8 @@ def test():
 
 
 	#set manually
-	dataset = 'emt4'
-	model_suffix = 'gst_zo_concat'
+	dataset = 'vctk'
+	model_suffix = '1cond_vctk'
 	concat = True
 	cur_dir = os.getcwd()
 	one_up_dir = os.path.dirname(cur_dir)
