@@ -95,7 +95,7 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	synth = Synthesizer()
 	synth.load(checkpoint_path, hparams, gta=GTA, use_intercross=args.intercross)
 	with open(args.metadata_filename, encoding='utf-8') as f:
-		metadata = [line.strip().split('|') for line in f]
+		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
 		hours = sum([int(x[5]) for x in metadata]) * frame_shift_ms / (3600)
 		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
