@@ -95,7 +95,7 @@ hparams = tf.contrib.training.HParams(
 	trim_silence = True, #Whether to clip silence in Audio (at beginning and end of audio only, not the middle)
 	trim_fft_size = 2048, #Trimming window size
 	trim_hop_size = 512, #Trimmin hop length
-	trim_top_db = 40, #Trimming db difference from reference db (smaller==harder trim.)
+	trim_top_db = 30, #Trimming db difference from reference db (smaller==harder trim.)
 
 	#Mel and Linear spectrograms normalization/scaling and clipping
 	signal_normalization = True, #Whether to normalize mel spectrograms to some predefined range (following below parameters)
@@ -288,7 +288,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_clip_gradients = True, #whether to clip gradients
 
 	#Evaluation parameters
-	tacotron_natural_eval = False, #Whether to use 100% natural eval (to evaluate Curriculum Learning performance) or with same teacher-forcing ratio as in training (just for overfit)
+	tacotron_natural_eval = True, #False, #Whether to use 100% natural eval (to evaluate Curriculum Learning performance) or with same teacher-forcing ratio as in training (just for overfit)
 
 	#Decoder RNN learning can take be done in one of two ways:
 	#	Teacher Forcing: vanilla teacher forcing (usually with ratio = 1). mode='constant'
@@ -296,7 +296,7 @@ hparams = tf.contrib.training.HParams(
 	#The second approach is inspired by:
 	#Bengio et al. 2015: Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks.
 	#Can be found under: https://arxiv.org/pdf/1506.03099.pdf
-	tacotron_teacher_forcing_mode = 'scheduled', #'constant', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
+	tacotron_teacher_forcing_mode = 'constant', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 	tacotron_teacher_forcing_ratio = 1., #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
 	tacotron_teacher_forcing_init_ratio = 1., #initial teacher forcing ratio. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_final_ratio = 0., #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'

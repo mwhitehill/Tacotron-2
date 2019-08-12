@@ -21,13 +21,23 @@ _batches_per_group = 64
 test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
 			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 
-def get_metadata_df(path):
+
+#Not used anymore - generate dataframe from metadata list - allows clipping out short utterances
+def get_metadata_df(path, args):
 
 	# load metadata into a dataframe
 	columns = ['dataset','audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
 						 'emt_label', 'spk_label', 'basename', 'sex']
 	meta_df = pd.read_csv(path, sep='|')
 	meta_df.columns = columns
+
+	if args.remove_long_samps:
+		raise ValueError('Should not be using remove long samples with getting metatdata dataframe from text file')
+		# idxs = meta_df[meta_df['basename'].map(lambda x: str(x).endswith('_023.wav'))].index.values
+		# idxs = np.append(idxs,meta_df[meta_df['basename'].map(lambda x: str(x).endswith('_021.wav'))].index.values)
+		# idxs = np.append(idxs, meta_df[meta_df['mel_frames'].map(lambda x: x>=900)].index.values)
+		# meta_df = meta_df.drop(idxs)
+
 	return(meta_df)
 
 class Feeder:
@@ -47,17 +57,27 @@ class Feeder:
 		# Load metadata
 		self.data_folder = os.path.dirname(metadata_filename)
 
-		# self._mel_dir = os.path.join(dataset_folder, 'mels')
-		# self._linear_dir = os.path.join(dataset_folder, 'linear')
-		# self._spk_emb_dir = os.path.join(dataset_folder, 'spkemb')
-
 		with open(metadata_filename, encoding='utf-8') as f:
 			self._metadata = [line.strip().split('|') for line in f]
+			if args.remove_long_samps:
+				len_before = len(self._metadata)
+				#remove the 2 longest utterances + any over 900 frames long
+				self._metadata = [f for f in self._metadata if not(f[10].endswith('_023.wav'))]
+				self._metadata = [f for f in self._metadata if not(f[10].endswith('_021.wav'))]
+				self._metadata = [f for f in self._metadata if int(f[6]) < 900]
+				print("Removed Long Samples")
+				print("# samps before:", len_before)
+				print("# samps after:", len(self._metadata))
 			frame_shift_ms = hparams.hop_size / hparams.sample_rate
-			hours = sum([int(x[5]) for x in self._metadata]) * frame_shift_ms / (3600)
+			hours = sum([int(x[6]) for x in self._metadata]) * frame_shift_ms / (3600)
 			log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
 
-		self._metadata_df = get_metadata_df(metadata_filename)
+		# self._metadata_df = get_metadata_df(metadata_filename, args)
+		self._metadata_df = pd.DataFrame(self._metadata)
+		columns = ['dataset', 'audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps',
+							 'mel_frames', 'text',
+							 'emt_label', 'spk_label', 'basename', 'sex']
+		self._metadata_df.columns = columns
 
 		#Train test split
 		if hparams.tacotron_test_size is None:
@@ -76,10 +96,15 @@ class Feeder:
 		self._train_meta = list(np.array(self._metadata)[train_indices])
 		self._test_meta = list(np.array(self._metadata)[test_indices])
 
+		if args.test_max_len:
+			self._train_meta.sort(key=lambda x: int(x[6]),reverse=True)
+			self._test_meta.sort(key=lambda x: int(x[6]), reverse=True)
+			print("TESTING MAX LENGTH FOR SAMPLES TO FIND MAX BATCH SIZE")
+
 		self._metadata_df['train_test'] = 'train'
 		self._metadata_df.iloc[np.array(sorted(test_indices))-1,-1] = 'test'
 
-		self.test_steps = len(self._test_meta) // hparams.tacotron_batch_size
+		self.test_steps = args.tacotron_test_steps #len(self._test_meta) // hparams.tacotron_batch_size
 
 		if hparams.tacotron_test_size is None:
 			assert hparams.tacotron_test_batches == self.test_steps
@@ -212,7 +237,11 @@ class Feeder:
 		# Bucket examples based on similar output sequence length for efficiency
 		examples.sort(key=lambda x: x[-1])
 		batches = [examples[i: i+n] for i in range(0, len(examples), n)]
-		np.random.shuffle(batches)
+
+		if self._args.test_max_len:
+			batches = batches[::-1]
+		else:
+			np.random.shuffle(batches)
 
 		log('\nGenerated {} test batches of size {} in {:.3f} sec'.format(len(batches), n, time.time() - start))
 		return batches, r
@@ -229,7 +258,10 @@ class Feeder:
 			# Bucket examples based on similar output sequence length for efficiency
 			examples.sort(key=lambda x: x[-1])
 			batches = [examples[i: i+n] for i in range(0, len(examples), n)]
-			np.random.shuffle(batches)
+			if self._args.test_max_len:
+				batches = batches[::-1]
+			else:
+				np.random.shuffle(batches)
 
 			log('\nGenerated {} train batches of size {} in {:.3f} sec'.format(len(batches), n, time.time() - start))
 			for batch in batches:
@@ -291,7 +323,7 @@ class Feeder:
 				ref_mel_spk = mel_target
 				# find all mels with same emotion type
 				df_meta_same_style = df_meta[df_meta.loc[:, 'dataset'] == dataset]
-				df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == int(emt_label)]
+				df_meta_same_style = df_meta_same_style[df_meta_same_style.loc[:, 'emt_label'] == emt_label]
 
 				# select one mel from same style to use as reference
 				idx = np.random.choice(df_meta_same_style.index)
@@ -301,7 +333,7 @@ class Feeder:
 			elif dataset == 'librispeech' or 'vctk':
 				ref_mel_emt = mel_target
 				# find all mels with same spk type
-				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == int(spk_label)]
+				df_meta_same_style = df_meta[df_meta.loc[:, 'spk_label'] == spk_label]
 
 				# select one mel from same style to use as reference
 				idx = np.random.choice(df_meta_same_style.index)
@@ -402,8 +434,12 @@ def test():
 	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
 	args = parser.parse_args()
 
+	args.tacotron_test_steps = 3
+	args.remove_long_samps = True
+	args.test_max_len = True
+
 	# metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/emt4/train.txt'
-	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train.txt'
+	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train_emt4_vctk.txt'
 	coord = tf.train.Coordinator()
 	feeder = Feeder(coord, metadata_filename, hparams, args)
 

@@ -118,7 +118,7 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 			if m[14] == 'same':
 				mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
 			else:
-				mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'librispeech', 'mels', m[14]))
+				mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'vctk', 'mels', m[14]))
 
 	mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
 																											 basenames_refs=basenames_refs,
@@ -218,8 +218,9 @@ def test():
 
 
 	#set manually
-	model_suffix = '2conds_disc_orthog'
-	args.mode = 'style_embs' #'synthesis'
+	datasets = 'emt4_vctk'
+	model_suffix = '2conds_{}'.format(datasets)
+	args.mode = 'synthesis' #'style_embs' #'synthesis'
 
 	#MODEL SETTINGS
 	concat = True
@@ -236,8 +237,8 @@ def test():
 	args.GTA=False
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
-	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test.txt')
-	args.train_filename = os.path.join(one_up_dir, 'data/train.txt')
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test_{}.txt'.format(datasets))
+	args.train_filename = os.path.join(one_up_dir, 'data/train_{}.txt'.format(datasets))
 	hparams.tacotron_gst_concat = concat
 	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 

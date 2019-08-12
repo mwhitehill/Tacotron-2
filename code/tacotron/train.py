@@ -108,12 +108,12 @@ def model_test_mode(args, feeder, hparams, global_step):
 		if hparams.predict_linear:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
-				is_training=False, is_evaluating=False, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
+				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
 				spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
 				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross)
 		else:
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
-				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=False,
+				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
 				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
 				use_intercross=args.intercross)
@@ -258,8 +258,8 @@ def train(log_dir, args, hparams):
 					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.4f}, emt_disc_acc={:4.2f}%]'.format(
 						step, time_window.average, loss, loss_window.average, emt_disc_loss_window.average, emt_disc_acc_window.average*100)
 				else:
-					message = 'Step {:7d}, tfr={:.3f} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}]'.format(
-						step, ratio, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average)
+					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}]'.format(
+						step, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average)
 
 				log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
@@ -273,7 +273,8 @@ def train(log_dir, args, hparams):
 
 				if step % args.eval_interval == 0:
 					#Run eval and save eval stats
-					log('\nRunning evaluation at step {}'.format(step))
+					log('\nRunning evaluation and saving model at step {}'.format(step))
+					saver.save(sess, checkpoint_path, global_step=global_step)
 
 					eval_losses = []
 					before_losses = []
@@ -307,9 +308,10 @@ def train(log_dir, args, hparams):
 
 					else:
 						for i in tqdm(range(feeder.test_steps)):
-							eloss, before_loss, after_loss, stop_token_loss, mel_p, mel_t, t_len, align = sess.run([
+							eloss, before_loss, after_loss, stop_token_loss, input_seq, mel_p, mel_t, t_len, align = sess.run([
 								eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
-								eval_model.tower_stop_token_loss[0], eval_model.tower_mel_outputs[0][0], eval_model.tower_mel_targets[0][0],
+								eval_model.tower_stop_token_loss[0],eval_model.tower_inputs[0][0], eval_model.tower_mel_outputs[0][0],
+								eval_model.tower_mel_targets[0][0],
 								eval_model.tower_targets_lengths[0][0], eval_model.tower_alignments[0][0]
 								])
 							eval_losses.append(eloss)
@@ -322,7 +324,7 @@ def train(log_dir, args, hparams):
 					after_loss = sum(after_losses) / len(after_losses)
 					stop_token_loss = sum(stop_token_losses) / len(stop_token_losses)
 
-					log('Saving eval log to {}..'.format(eval_dir))
+					# log('Saving eval log to {}..'.format(eval_dir))
 					#Save some log to monitor model improvement on same unseen sequence
 					if hparams.GL_on_GPU:
 						wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_p})
@@ -331,11 +333,12 @@ def train(log_dir, args, hparams):
 						wav = audio.inv_mel_spectrogram(mel_p.T, hparams)
 					audio.save_wav(wav, os.path.join(eval_wav_dir, 'step-{}-eval-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
 
+					input_seq = sequence_to_text(input_seq)
 					plot.plot_alignment(align, os.path.join(eval_plot_dir, 'step-{}-eval-align.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, eval_loss),
+						title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss, input_seq),
 						max_len=t_len // hparams.outputs_per_step)
 					plot.plot_spectrogram(mel_p, os.path.join(eval_plot_dir, 'step-{}-eval-mel-spectrogram.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, eval_loss), target_spectrogram=mel_t,
+						title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss,input_seq), target_spectrogram=mel_t,
 						max_len=t_len)
 
 					if hparams.predict_linear:
@@ -343,8 +346,8 @@ def train(log_dir, args, hparams):
 							title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, eval_loss), target_spectrogram=lin_t,
 							max_len=t_len, auto_aspect=True)
 
-					log('Eval loss for global step {}: {:.3f}'.format(step, eval_loss))
-					log('Writing eval summary!')
+					log('Step {:7d} [eval loss: {:.3f}, before loss: {:.3f}, after loss: {:.3f}, stop loss: {:.3f}]'.format(step, eval_loss, before_loss, after_loss, stop_token_loss))
+					# log('Writing eval summary!')
 					add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, eval_loss)
 
 
@@ -383,11 +386,11 @@ def train(log_dir, args, hparams):
 
 					else:
 						input_seq, mel_prediction, alignment, target, target_length = sess.run([
-							model.tower_inputs[0][0],
-							model.tower_mel_outputs[0][0],
-							model.tower_alignments[0][0],
-							model.tower_mel_targets[0][0],
-							model.tower_targets_lengths[0][0],
+							eval_model.tower_inputs[0][0],
+							eval_model.tower_mel_outputs[0][0],
+							eval_model.tower_alignments[0][0],
+							eval_model.tower_mel_targets[0][0],
+							eval_model.tower_targets_lengths[0][0],
 							])
 
 					#save predicted mel spectrogram to disk (debug)
