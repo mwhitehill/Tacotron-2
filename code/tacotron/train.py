@@ -83,17 +83,30 @@ def model_train_mode(args, feeder, hparams, global_step):
 			model_name = 'Tacotron'
 		model = create_model(model_name or args.model, hparams)
 		if hparams.predict_linear:
+			raise ValueError('predict linear not implemented')
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
 				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
 				use_intercross=args.intercross)
 		else:
+			# model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
+			# 	targets_lengths=feeder.targets_lengths, global_step=global_step,
+			# 	is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
+			# 	ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+			# 	use_intercross=args.intercross)
+			ref_mel_up_emt = None
+			ref_mel_up_spk = None
+			if args.unpaired:
+				ref_mel_up_emt = feeder.ref_mel_up_emt
+				ref_mel_up_spk = feeder.ref_mel_up_spk
+
 			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
-				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross)
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels,
+				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
+				ref_mel_up_emt=ref_mel_up_emt, ref_mel_up_spk=ref_mel_up_spk, use_emt_disc = args.emt_disc,
+				use_spk_disc = args.spk_disc, use_intercross=args.intercross, use_unpaired=args.unpaired)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -106,15 +119,21 @@ def model_test_mode(args, feeder, hparams, global_step):
 			model_name = 'Tacotron'
 		model = create_model(model_name or args.model, hparams)
 		if hparams.predict_linear:
+			raise ValueError('predict linear not implemented')
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
 				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
 				spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
 				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross)
 		else:
+			# model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+			# 	targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
+			# 	split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb,
+			# 	ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+			# 	use_intercross=args.intercross)
 			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
-				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb,
+				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
 				use_intercross=args.intercross)
 		model.add_loss()
@@ -192,6 +211,8 @@ def train(log_dir, args, hparams):
 	loss_emt_window = ValueWindow(100)
 	loss_spk_window = ValueWindow(100)
 	loss_orthog_window = ValueWindow(100)
+	loss_l1_emt_window = ValueWindow(100)
+	loss_l1_spk_window = ValueWindow(100)
 
 	if args.emt_disc:
 		emt_disc_loss_window = ValueWindow(100)
@@ -241,16 +262,20 @@ def train(log_dir, args, hparams):
 				if args.emt_disc:
 					step, loss, opt, emt_disc_loss, emt_disc_acc = sess.run([global_step, model.loss,model.optimize,model.emt_disc_loss,model.emt_disc_acc])
 				else:
-					step, loss, opt, loss_emt, loss_spk, loss_orthog, ratio = sess.run([global_step, model.loss, model.optimize,
-																																			 model.style_emb_loss_emt,
-																																			 model.style_emb_loss_spk,
-																																			 model.style_emb_orthog_loss,
-																																			 model.helper._ratio])
+					step, loss, opt, loss_emt, loss_spk, loss_orthog, loss_l1_emt, loss_l1_spk, ratio = sess.run([global_step, model.loss, model.optimize,
+																																																				model.style_emb_loss_emt,
+																																																				model.style_emb_loss_spk,
+																																																				model.style_emb_orthog_loss,
+																																																				model.up_l1_emt_loss,
+																																																				model.up_l1_spk_loss,
+																																																				model.helper._ratio])
 				time_window.append(time.time() - start_time)
 				loss_window.append(loss)
 				loss_emt_window.append(loss_emt)
 				loss_spk_window.append(loss_spk)
 				loss_orthog_window.append(loss_orthog)
+				loss_l1_emt_window.append(loss_l1_emt)
+				loss_l1_spk_window.append(loss_l1_spk)
 
 				if args.emt_disc:
 					emt_disc_loss_window.append(emt_disc_loss)
@@ -258,8 +283,8 @@ def train(log_dir, args, hparams):
 					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.4f}, emt_disc_acc={:4.2f}%]'.format(
 						step, time_window.average, loss, loss_window.average, emt_disc_loss_window.average, emt_disc_acc_window.average*100)
 				else:
-					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}]'.format(
-						step, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average)
+					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}, l1_emt_loss={:.5f}, l1_spk_loss={:.5f}]'.format(
+						step, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average,loss_l1_emt_window.average,loss_l1_spk_window.average)
 
 				log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 

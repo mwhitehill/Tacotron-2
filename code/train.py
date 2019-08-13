@@ -121,6 +121,7 @@ def main():
 	parser.add_argument('--tacotron_test_steps', type=int, default=3, help='Num batches to process when running evaluation')
 	parser.add_argument('--remove_long_samps', action='store_true', default=False, help='Will remove out the longest samples from EMT4/VCTK')
 	parser.add_argument('--test_max_len', action='store_true', default=False,help='Will create batches with the longest samples first to test max batch size')
+	parser.add_argument('--unpaired', action='store_true', default=False,help='Will create batches with the longest samples first to test max batch size')
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']
