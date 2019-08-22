@@ -106,11 +106,11 @@ def main():
 		help='Steps between running summary ops')
 	parser.add_argument('--embedding_interval', type=int, default=1000000,
 		help='Steps between updating embeddings projection visualization')
-	parser.add_argument('--checkpoint_interval', type=int, default=40,
+	parser.add_argument('--checkpoint_interval', type=int, default=500,
 		help='Steps between writing checkpoints')
-	parser.add_argument('--eval_interval', type=int, default=1000000,
+	parser.add_argument('--eval_interval', type=int, default=40,
 		help='Steps between eval on test data')
-	parser.add_argument('--tacotron_train_steps', type=int, default=100000, help='total number of tacotron training steps')
+	parser.add_argument('--tacotron_train_steps', type=int, default=1000000, help='total number of tacotron training steps')
 	parser.add_argument('--wavenet_train_steps', type=int, default=500000, help='total number of wavenet training steps')
 	parser.add_argument('--tf_log_level', type=int, default=1, help='Tensorflow C++ log level.')
 	parser.add_argument('--slack_url', default=None, help='slack webhook notification destination link')
@@ -122,6 +122,15 @@ def main():
 	parser.add_argument('--remove_long_samps', action='store_true', default=False, help='Will remove out the longest samples from EMT4/VCTK')
 	parser.add_argument('--test_max_len', action='store_true', default=False,help='Will create batches with the longest samples first to test max batch size')
 	parser.add_argument('--unpaired', action='store_true', default=False,help='Will create batches with the longest samples first to test max batch size')
+	parser.add_argument('--TEST', action='store_true', default=False,help='Uses small groups of batches to make testing faster')
+	parser.add_argument('--use_2attn', action='store_true', default=False, help='Use 2 attention modules for GST')
+	parser.add_argument('--max_to_keep', type=int, default=50, help='how many checkpoints to save')
+	parser.add_argument('--recon_emb_loss', action='store_true', default=False, help='Adds loss for reconstructing embeddings')
+	parser.add_argument('--intercross_both', action='store_true', default=False, help='does intercross for emotion and spk for both datasets')
+	parser.add_argument('--unpaired_loss_derate', type=float, default=1, help='how much to derate the unpaired mel out emb disc loss')
+	parser.add_argument('--lock_ref_enc', action='store_true', default=False, help='does not allow retraining of reference encoders')
+	parser.add_argument('--lock_gst', action='store_true', default=False, help='does not allow retraining of global style tokens')
+	parser.add_argument('--nat_gan', action='store_true', default=False, help='whether to use the naturalness gan')
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']
@@ -130,6 +139,14 @@ def main():
 		raise ValueError('please enter a valid model to train: {}'.format(accepted_models))
 
 	log_dir, hparams = prepare_run(args)
+
+	import socket
+	if socket.gethostname() == 'A3907623':
+		hparams.tacotron_num_gpus = 1
+		hparams.tacotron_batch_size = 32
+
+	if hparams.tacotron_fine_tuning and not(args.restore):
+		raise ValueError('fine_tuning set to true but not restoring the model!')
 
 	if args.model == 'Tacotron':
 		tacotron_train(args, log_dir, hparams)

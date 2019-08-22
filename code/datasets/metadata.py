@@ -38,6 +38,44 @@ def create_metadata_emt4():
   df_metadata_path = os.path.join(folder_data, 'metadata_emt4.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
+def create_metadata_harriton():
+
+  folder_raw = r'C:\Users\t-mawhit\Documents\data\Harriton\emotion'
+  folder_wav = os.path.join(folder_raw, 'Wave16kNormalized')
+  folder_data_emth= os.path.join(folder_data, 'emth')
+  os.makedirs(folder_data_emth,exist_ok=True)
+
+  all_txt_path = os.path.join(folder_raw, 'all_txt_wav.txt')
+  df_all_txt = pd.read_csv(all_txt_path, encoding='utf-8',sep=r'\t',names=['filename', 'script'],dtype={'filename': 'object'},engine='python')
+
+  df_all_txt['emotion_label'] = 0
+	
+	#swap emotion labels for harriton to match Zo (i.e. angry is labelled 1 in harriton but is 2 in zo)
+  for i1,i2 in [('1','2'),('2','1'),('3','3')]:
+    idxs = df_all_txt[df_all_txt['filename'].map(lambda x: x.startswith(i1))].index
+    df_all_txt.loc[idxs,'emotion_label'] = int(i2)
+
+  paths = []
+  for i,(root, dirs, files) in enumerate(os.walk(folder_wav, topdown=True)):
+    for f in files:
+      if not(f.endswith('.wav') or f.endswith('.flac')):
+        print("non audio file -", f)
+        continue
+      paths.append(os.path.join(os.path.basename(os.path.dirname(root)), os.path.basename(root),f))
+
+  columns = ['path', 'script', 'emt_label', 'spk_id', 'sex']
+  df_metadata = pd.DataFrame([],columns=columns)
+
+  for p in paths[:]:
+    fname = os.path.basename(p)
+    name = fname.split('.')[0]
+    row = df_all_txt[df_all_txt.filename == name]
+    script = row.script.values[0]
+    emt_label = row.emotion_label.values[0]
+    df_metadata = df_metadata.append(pd.DataFrame([[p.replace('\\','/'),script,emt_label,-1,'M']],columns=columns),ignore_index=True)
+  df_metadata_path = os.path.join(folder_data, 'metadata_emth.txt')
+  df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
+
 
 def get_librispeech_transcript(root, spk_id, book_no):
   df_transcript_path = os.path.join(root, '{0}-{1}.trans.txt'.format(spk_id, book_no))
@@ -98,7 +136,7 @@ def create_metadata_librispeech():
 
 def create_metadata_vctk():
 
-  folder = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\VCTK-Corpus'
+  folder = r'C:\Users\t-mawhit\Documents\data\VCTK-Corpus'
   folder_wav = os.path.join(folder,'wav48')
   folder_data_vctk = os.path.join(folder_data, 'vctk')
   os.makedirs(folder_data_vctk,exist_ok=True)
@@ -140,7 +178,16 @@ def create_metadata_vctk():
           script = f.read()
       except:
         print("couldn't find txt for", fname,"- skipping")
+        continue
 
+      if script.startswith('"'):
+        script_before = script
+        script = script[1:]
+        print("clipping start quote - ",fname,"before:",script_before, "after:",script)
+      if script.endswith('"'):
+        script_before = script
+        script = script[:-1]
+        print("clipping end quote - ", fname, "before:", script_before, "after:", script)
       df_metadata = df_metadata.append(
         pd.DataFrame([[path.replace('\\', '/'), script[:-1], emt_label, spk_id, sex,accent,region]], columns=columns),
         ignore_index=True)
@@ -150,8 +197,9 @@ def create_metadata_vctk():
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
 if __name__ == '__main__':
-  create_metadata_vctk()
+  # create_metadata_vctk()
   # create_metadata_librispeech()
   # create_metadata_emt4()
+  create_metadata_harriton()
 
 

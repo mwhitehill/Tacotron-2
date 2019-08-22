@@ -84,29 +84,31 @@ def model_train_mode(args, feeder, hparams, global_step):
 		model = create_model(model_name or args.model, hparams)
 		if hparams.predict_linear:
 			raise ValueError('predict linear not implemented')
-			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
-				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
-				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross)
-		else:
-			# model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
-			# 	targets_lengths=feeder.targets_lengths, global_step=global_step,
-			# 	is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.spk_emb,
-			# 	ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-			# 	use_intercross=args.intercross)
-			ref_mel_up_emt = None
-			ref_mel_up_spk = None
-			if args.unpaired:
-				ref_mel_up_emt = feeder.ref_mel_up_emt
-				ref_mel_up_spk = feeder.ref_mel_up_spk
-
-			model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
+			model.initialize(args, feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
 				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels,
-				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
+				emt_up_labels = feeder.emt_up_labels, spk_up_labels = feeder.spk_up_labels, spk_emb= feeder.spk_emb,
+				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+				use_intercross=args.intercross,use_2attn=args.use_2attn, n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
+		else:
+			# model.initialize(args,feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
+			# 	targets_lengths=feeder.targets_lengths, global_step=global_step,
+			# 	is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels,
+			# 	emt_up_labels = feeder.emt_up_labels, spk_up_labels = feeder.spk_up_labels,	spk_emb= feeder.spk_emb,
+			# 	ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+			# 	use_intercross=args.intercross)
+			emt_up_labels = feeder.emt_up_labels if args.unpaired else None
+			spk_up_labels = feeder.spk_up_labels if args.unpaired else None
+			ref_mel_up_emt = feeder.ref_mel_up_emt if args.unpaired else None
+			ref_mel_up_spk = feeder.ref_mel_up_spk if args.unpaired else None
+
+			model.initialize(args, feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
+				targets_lengths=feeder.targets_lengths, global_step=global_step,
+				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels,
+				emt_up_labels = emt_up_labels, spk_up_labels = spk_up_labels, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
 				ref_mel_up_emt=ref_mel_up_emt, ref_mel_up_spk=ref_mel_up_spk, use_emt_disc = args.emt_disc,
-				use_spk_disc = args.spk_disc, use_intercross=args.intercross, use_unpaired=args.unpaired)
+				use_spk_disc = args.spk_disc, use_intercross=args.intercross, use_unpaired=args.unpaired, use_2attn=args.use_2attn,
+				n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -120,22 +122,23 @@ def model_test_mode(args, feeder, hparams, global_step):
 		model = create_model(model_name or args.model, hparams)
 		if hparams.predict_linear:
 			raise ValueError('predict linear not implemented')
-			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
 				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
 				spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
-				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross)
+				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross,use_2attn=args.use_2attn,
+				n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
 		else:
-			# model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+			# model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 			# 	targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
 			# 	split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb,
 			# 	ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
 			# 	use_intercross=args.intercross)
-			model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
 				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels,
 				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross)
+				use_intercross=args.intercross,use_2attn=args.use_2attn, n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
 		model.add_loss()
 		return model
 
@@ -208,18 +211,32 @@ def train(log_dir, args, hparams):
 	step = 0
 	time_window = ValueWindow(100)
 	loss_window = ValueWindow(100)
+	loss_bef_window = ValueWindow(100)
+	loss_aft_window = ValueWindow(100)
+	loss_stop_window = ValueWindow(100)
+	loss_reg_window = ValueWindow(100)
 	loss_emt_window = ValueWindow(100)
 	loss_spk_window = ValueWindow(100)
 	loss_orthog_window = ValueWindow(100)
-	loss_l1_emt_window = ValueWindow(100)
-	loss_l1_spk_window = ValueWindow(100)
+	loss_up_emt_window = ValueWindow(100)
+	loss_up_spk_window = ValueWindow(100)
+	loss_mo_up_emt_window = ValueWindow(100)
+	loss_mo_up_spk_window = ValueWindow(100)
+	if args.nat_gan:
+		d_loss_t_window = ValueWindow(100)
+		d_loss_p_window = ValueWindow(100)
+		d_loss_up_window = ValueWindow(100)
+		g_loss_p_window = ValueWindow(100)
+		g_loss_up_window = ValueWindow(100)
 
 	if args.emt_disc:
 		emt_disc_loss_window = ValueWindow(100)
 		emt_disc_acc_window = ValueWindow(100)
-	saver = tf.train.Saver(max_to_keep=2)
+	saver = tf.train.Saver(max_to_keep=args.max_to_keep)
 
 	log('Tacotron training set to a maximum of {} steps'.format(args.tacotron_train_steps))
+	if hparams.tacotron_fine_tuning:
+		print('FINE TUNING SET TO TRUE - MAKE SURE THIS IS WHAT YOU WANT!')
 
 	#Memory allocation on the GPU as needed
 	config = tf.ConfigProto()
@@ -254,37 +271,97 @@ def train(log_dir, args, hparams):
 
 			#initializing feeder
 			feeder.start_threads(sess)
-			ratio=0
 
 			#Training loop
 			while not coord.should_stop() and step < args.tacotron_train_steps:
 				start_time = time.time()
-				if args.emt_disc:
-					step, loss, opt, emt_disc_loss, emt_disc_acc = sess.run([global_step, model.loss,model.optimize,model.emt_disc_loss,model.emt_disc_acc])
+				# vars = [global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
+				# 				model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss]
+				# out = [step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog]
+				# message = 'Step {:7d} {:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, bef={:.5f}, aft={:.5f}, stop={:.5f},' \
+				# 					'reg={:.5f}, emt={:.5f}, spk={:.5f}, orthog={:.5f}'.format(step, time_window.average, loss, loss_window.average,
+				# 																																		 loss_bef_window.average, loss_aft_window.average,
+				# 																																		 loss_stop_window.average, loss_reg_window.average,
+				# 																																		 loss_emt_window.average, loss_spk_window.average,
+				# 																																		 loss_orthog_window.average)
+				# if args.unpaired:
+				# 	vars += [model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt, model.style_emb_loss_mel_out_up_spk]
+				# 	out += [loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk]
+				# 	message += ' up_emt={:.5f}, up_spk={:.5f}, mo_up_emt={:.5f}, mo_up_spk={:.5f}]'.format(loss_up_emt_window.average,
+				# 																																												loss_up_spk_window.average,
+				# 																																												loss_mo_up_emt_window.average,
+				# 																																												loss_mo_up_spk_window.average)
+				# if False:
+				# 	vars += [model.tower_style_emb_logit_emt[0], model.tower_emt_labels[0],model.tower_style_emb_logit_up_emt[0],
+				# 					model.tower_emt_up_labels[0],model.tower_spk_labels[0]]
+				# 	out += [emt_logit, emt_labels, emt_up_logit, emt_up_labels, spk_labels]
+				#
+				# out = sess.run([vars])
+				if args.nat_gan:
+					step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
+					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk,\
+					d_loss_t, d_loss_p, d_loss_up, g_loss_p, g_loss_up,opt_d = sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
+									model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
+									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt, model.style_emb_loss_mel_out_up_spk,
+									model.d_loss_targ, model.d_loss_p, model.d_loss_up, model.g_loss_p, model.g_loss_up,model.optimize_d])
 				else:
-					step, loss, opt, loss_emt, loss_spk, loss_orthog, loss_l1_emt, loss_l1_spk, ratio = sess.run([global_step, model.loss, model.optimize,
-																																																				model.style_emb_loss_emt,
-																																																				model.style_emb_loss_spk,
-																																																				model.style_emb_orthog_loss,
-																																																				model.up_l1_emt_loss,
-																																																				model.up_l1_spk_loss,
-																																																				model.helper._ratio])
+					step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
+					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk = sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
+									model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
+									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt, model.style_emb_loss_mel_out_up_spk])
+
+
+				# import pandas as pd
+				# print(emt_logit.shape, emt_labels.shape)
+				# if len(emt_logit.shape)>2:
+				# 	emt_logit = emt_logit.squeeze(1)
+				# 	emt_up_logit = emt_up_logit.squeeze(1)
+				# emt_labels = emt_labels.reshape(-1,1)
+				# emt_up_labels = emt_up_labels.reshape(-1, 1)
+				# spk_labels = spk_labels.reshape(-1, 1)
+				# df = np.concatenate((emt_logit,emt_labels,spk_labels,emt_up_logit,emt_up_labels),axis=1)
+				# print(emt_labels)
+				# print(emt_logit)
+				# print(emt_up_labels)
+				# print(emt_up_logit)
+				#
+				# pd.DataFrame(df).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\emt_logit_.001_up_10k.csv')
+				# raise
 				time_window.append(time.time() - start_time)
 				loss_window.append(loss)
+				loss_bef_window.append(bef)
+				loss_aft_window.append(aft)
+				loss_stop_window.append(stop)
+				loss_reg_window.append(reg)
 				loss_emt_window.append(loss_emt)
 				loss_spk_window.append(loss_spk)
 				loss_orthog_window.append(loss_orthog)
-				loss_l1_emt_window.append(loss_l1_emt)
-				loss_l1_spk_window.append(loss_l1_spk)
+				loss_up_emt_window.append(loss_up_emt)
+				loss_up_spk_window.append(loss_up_spk)
+				loss_mo_up_emt_window.append(loss_mo_up_emt)
+				loss_mo_up_spk_window.append(loss_mo_up_spk)
 
-				if args.emt_disc:
-					emt_disc_loss_window.append(emt_disc_loss)
-					emt_disc_acc_window.append(emt_disc_acc)
-					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.4f}, emt_disc_acc={:4.2f}%]'.format(
-						step, time_window.average, loss, loss_window.average, emt_disc_loss_window.average, emt_disc_acc_window.average*100)
-				else:
-					message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, emt_disc_loss={:.5f}, spk_disc_loss={:.5f}, orthog_loss={:.5f}, l1_emt_loss={:.5f}, l1_spk_loss={:.5f}]'.format(
-						step, time_window.average, loss, loss_window.average,loss_emt_window.average,loss_spk_window.average,loss_orthog_window.average,loss_l1_emt_window.average,loss_l1_spk_window.average)
+
+				if args.nat_gan:
+					d_loss_t_window.append(d_loss_t)
+					d_loss_p_window.append(d_loss_p)
+					d_loss_up_window.append(d_loss_up)
+					g_loss_p_window.append(g_loss_p)
+					g_loss_up_window.append(g_loss_up)
+
+				message = 'Step {:7d} {:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, bef={:.5f}, aft={:.5f}, stop={:.5f},' \
+								'reg={:.5f}, emt={:.5f}, spk={:.5f}, orthog={:.5f}'.format(step, time_window.average, loss, loss_window.average,
+																																				 loss_bef_window.average, loss_aft_window.average,
+																																				 loss_stop_window.average, loss_reg_window.average,
+																																				 loss_emt_window.average, loss_spk_window.average,
+																																				 loss_orthog_window.average)
+				message += ' up_emt={:.5f}, up_spk={:.5f}, mo_up_emt={:.5f}, mo_up_spk={:.5f}'.format(loss_up_emt_window.average,
+																																															 loss_up_spk_window.average,
+																																															 loss_mo_up_emt_window.average,
+																																															 loss_mo_up_spk_window.average)
+				if args.nat_gan:
+					message += ' d_loss_t={:.5f}, d_loss_p ={:.5f}, d_loss_up ={:.5f}, g_loss_p ={:.5f}, g_loss_up ={:.5f}'.format(
+						d_loss_t_window.average, d_loss_p_window.average, d_loss_up_window.average, g_loss_p_window.average, g_loss_up_window.average)
 
 				log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
@@ -296,131 +373,143 @@ def train(log_dir, args, hparams):
 					log('\nWriting summary at step {}'.format(step))
 					summary_writer.add_summary(sess.run(stats), step)
 
-				if step % args.eval_interval == 0:
-					#Run eval and save eval stats
-					log('\nRunning evaluation and saving model at step {}'.format(step))
-					saver.save(sess, checkpoint_path, global_step=global_step)
-
-					eval_losses = []
-					before_losses = []
-					after_losses = []
-					stop_token_losses = []
-					linear_losses = []
-					linear_loss = None
-
-					if hparams.predict_linear:
-						for i in tqdm(range(feeder.test_steps)):
-							eloss, before_loss, after_loss, stop_token_loss, linear_loss, mel_p, mel_t, t_len, align, lin_p, lin_t = sess.run([
-								eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
-								eval_model.tower_stop_token_loss[0], eval_model.tower_linear_loss[0], eval_model.tower_mel_outputs[0][0],
-								eval_model.tower_mel_targets[0][0], eval_model.tower_targets_lengths[0][0],
-								eval_model.tower_alignments[0][0], eval_model.tower_linear_outputs[0][0],
-								eval_model.tower_linear_targets[0][0],
-								])
-							eval_losses.append(eloss)
-							before_losses.append(before_loss)
-							after_losses.append(after_loss)
-							stop_token_losses.append(stop_token_loss)
-							linear_losses.append(linear_loss)
-						linear_loss = sum(linear_losses) / len(linear_losses)
-
-						if hparams.GL_on_GPU:
-							wav = sess.run(GLGPU_lin_outputs, feed_dict={GLGPU_lin_inputs: lin_p})
-							wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
-						else:
-							wav = audio.inv_linear_spectrogram(lin_p.T, hparams)
-						audio.save_wav(wav, os.path.join(eval_wav_dir, 'step-{}-eval-wave-from-linear.wav'.format(step)), sr=hparams.sample_rate)
-
-					else:
-						for i in tqdm(range(feeder.test_steps)):
-							eloss, before_loss, after_loss, stop_token_loss, input_seq, mel_p, mel_t, t_len, align = sess.run([
-								eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
-								eval_model.tower_stop_token_loss[0],eval_model.tower_inputs[0][0], eval_model.tower_mel_outputs[0][0],
-								eval_model.tower_mel_targets[0][0],
-								eval_model.tower_targets_lengths[0][0], eval_model.tower_alignments[0][0]
-								])
-							eval_losses.append(eloss)
-							before_losses.append(before_loss)
-							after_losses.append(after_loss)
-							stop_token_losses.append(stop_token_loss)
-
-					eval_loss = sum(eval_losses) / len(eval_losses)
-					before_loss = sum(before_losses) / len(before_losses)
-					after_loss = sum(after_losses) / len(after_losses)
-					stop_token_loss = sum(stop_token_losses) / len(stop_token_losses)
-
-					# log('Saving eval log to {}..'.format(eval_dir))
-					#Save some log to monitor model improvement on same unseen sequence
-					if hparams.GL_on_GPU:
-						wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_p})
-						wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
-					else:
-						wav = audio.inv_mel_spectrogram(mel_p.T, hparams)
-					audio.save_wav(wav, os.path.join(eval_wav_dir, 'step-{}-eval-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
-
-					input_seq = sequence_to_text(input_seq)
-					plot.plot_alignment(align, os.path.join(eval_plot_dir, 'step-{}-eval-align.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss, input_seq),
-						max_len=t_len // hparams.outputs_per_step)
-					plot.plot_spectrogram(mel_p, os.path.join(eval_plot_dir, 'step-{}-eval-mel-spectrogram.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss,input_seq), target_spectrogram=mel_t,
-						max_len=t_len)
-
-					if hparams.predict_linear:
-						plot.plot_spectrogram(lin_p, os.path.join(eval_plot_dir, 'step-{}-eval-linear-spectrogram.png'.format(step)),
-							title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, eval_loss), target_spectrogram=lin_t,
-							max_len=t_len, auto_aspect=True)
-
-					log('Step {:7d} [eval loss: {:.3f}, before loss: {:.3f}, after loss: {:.3f}, stop loss: {:.3f}]'.format(step, eval_loss, before_loss, after_loss, stop_token_loss))
-					# log('Writing eval summary!')
-					add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, eval_loss)
+				# if step % args.eval_interval == 0:
+				# 	#Run eval and save eval stats
+				# 	log('\nRunning evaluation and saving model at step {}'.format(step))
+				# 	saver.save(sess, checkpoint_path, global_step=global_step)
+				#
+				# 	eval_losses = []
+				# 	before_losses = []
+				# 	after_losses = []
+				# 	stop_token_losses = []
+				# 	linear_losses = []
+				# 	linear_loss = None
+				#
+				# 	if hparams.predict_linear:
+				# 		for i in tqdm(range(feeder.test_steps)):
+				# 			eloss, before_loss, after_loss, stop_token_loss, linear_loss, mel_p, mel_t, t_len, align, lin_p, lin_t = sess.run([
+				# 				eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
+				# 				eval_model.tower_stop_token_loss[0], eval_model.tower_linear_loss[0], eval_model.tower_mel_outputs[0][0],
+				# 				eval_model.tower_mel_targets[0][0], eval_model.tower_targets_lengths[0][0],
+				# 				eval_model.tower_alignments[0][0], eval_model.tower_linear_outputs[0][0],
+				# 				eval_model.tower_linear_targets[0][0],
+				# 				])
+				# 			eval_losses.append(eloss)
+				# 			before_losses.append(before_loss)
+				# 			after_losses.append(after_loss)
+				# 			stop_token_losses.append(stop_token_loss)
+				# 			linear_losses.append(linear_loss)
+				# 		linear_loss = sum(linear_losses) / len(linear_losses)
+				#
+				# 		if hparams.GL_on_GPU:
+				# 			wav = sess.run(GLGPU_lin_outputs, feed_dict={GLGPU_lin_inputs: lin_p})
+				# 			wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+				# 		else:
+				# 			wav = audio.inv_linear_spectrogram(lin_p.T, hparams)
+				# 		audio.save_wav(wav, os.path.join(eval_wav_dir, 'step-{}-eval-wave-from-linear.wav'.format(step)), sr=hparams.sample_rate)
+				#
+				# 	else:
+				# 		for i in tqdm(range(feeder.test_steps)):
+				# 			eloss, before_loss, after_loss, stop_token_loss, input_seq, mel_p, mel_t, t_len, align = sess.run([
+				# 				eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
+				# 				eval_model.tower_stop_token_loss[0],eval_model.tower_inputs[0][0], eval_model.tower_mel_outputs[0][0],
+				# 				eval_model.tower_mel_targets[0][0],
+				# 				eval_model.tower_targets_lengths[0][0], eval_model.tower_alignments[0][0]
+				# 				])
+				# 			eval_losses.append(eloss)
+				# 			before_losses.append(before_loss)
+				# 			after_losses.append(after_loss)
+				# 			stop_token_losses.append(stop_token_loss)
+				#
+				# 	eval_loss = sum(eval_losses) / len(eval_losses)
+				# 	before_loss = sum(before_losses) / len(before_losses)
+				# 	after_loss = sum(after_losses) / len(after_losses)
+				# 	stop_token_loss = sum(stop_token_losses) / len(stop_token_losses)
+				#
+				# 	# log('Saving eval log to {}..'.format(eval_dir))
+				# 	#Save some log to monitor model improvement on same unseen sequence
+				# 	if hparams.GL_on_GPU:
+				# 		wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_p})
+				# 		wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+				# 	else:
+				# 		wav = audio.inv_mel_spectrogram(mel_p.T, hparams)
+				# 	audio.save_wav(wav, os.path.join(eval_wav_dir, 'step-{}-eval-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
+				#
+				# 	input_seq = sequence_to_text(input_seq)
+				# 	plot.plot_alignment(align, os.path.join(eval_plot_dir, 'step-{}-eval-align.png'.format(step)),
+				# 		title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss, input_seq),
+				# 		max_len=t_len // hparams.outputs_per_step)
+				# 	plot.plot_spectrogram(mel_p, os.path.join(eval_plot_dir, 'step-{}-eval-mel-spectrogram.png'.format(step)),
+				# 		title='{}, {}, step={}, loss={:.5f}\n{}'.format(args.model, time_string(), step, eval_loss,input_seq), target_spectrogram=mel_t,
+				# 		max_len=t_len)
+				#
+				# 	if hparams.predict_linear:
+				# 		plot.plot_spectrogram(lin_p, os.path.join(eval_plot_dir, 'step-{}-eval-linear-spectrogram.png'.format(step)),
+				# 			title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, eval_loss), target_spectrogram=lin_t,
+				# 			max_len=t_len, auto_aspect=True)
+				#
+				# 	log('Step {:7d} [eval loss: {:.3f}, before loss: {:.3f}, after loss: {:.3f}, stop loss: {:.3f}]'.format(step, eval_loss, before_loss, after_loss, stop_token_loss))
+				# 	# log('Writing eval summary!')
+				# 	add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, eval_loss)
 
 
 				if step % args.checkpoint_interval == 0 or step == args.tacotron_train_steps or step == 300:
 					#Save model and current global step
 					saver.save(sess, checkpoint_path, global_step=global_step)
 
-					log('\nSaving alignment, Mel-Spectrograms and griffin-lim inverted waveform..')
+					log('\nSaved model at step {}'.format(step))
+
+				if step % args.eval_interval == 0:
+
 					if hparams.predict_linear:
-						input_seq, mel_prediction, linear_prediction, alignment, target, target_length, linear_target = sess.run([
-							model.tower_inputs[0][0],
-							model.tower_mel_outputs[0][0],
-							model.tower_linear_outputs[0][0],
-							model.tower_alignments[0][0],
-							model.tower_mel_targets[0][0],
-							model.tower_targets_lengths[0][0],
-							model.tower_linear_targets[0][0],
-							])
-
-						#save predicted linear spectrogram to disk (debug)
-						linear_filename = 'linear-prediction-step-{}.npy'.format(step)
-						np.save(os.path.join(linear_dir, linear_filename), linear_prediction.T, allow_pickle=False)
-
-						#save griffin lim inverted wav for debug (linear -> wav)
-						if hparams.GL_on_GPU:
-							wav = sess.run(GLGPU_lin_outputs, feed_dict={GLGPU_lin_inputs: linear_prediction})
-							wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
-						else:
-							wav = audio.inv_linear_spectrogram(linear_prediction.T, hparams)
-						audio.save_wav(wav, os.path.join(wav_dir, 'step-{}-wave-from-linear.wav'.format(step)), sr=hparams.sample_rate)
-
-						#Save real and predicted linear-spectrogram plot to disk (control purposes)
-						plot.plot_spectrogram(linear_prediction, os.path.join(plot_dir, 'step-{}-linear-spectrogram.png'.format(step)),
-							title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, loss), target_spectrogram=linear_target,
-							max_len=target_length, auto_aspect=True)
+						raise ValueError('predict linear not implemented')
+						# input_seq, mel_prediction, linear_prediction, alignment, target, target_length, linear_target = sess.run([
+						# 	model.tower_inputs[0][0],
+						# 	model.tower_mel_outputs[0][0],
+						# 	model.tower_linear_outputs[0][0],
+						# 	model.tower_alignments[0][0],
+						# 	model.tower_mel_targets[0][0],
+						# 	model.tower_targets_lengths[0][0],
+						# 	model.tower_linear_targets[0][0],
+						# 	])
+						#
+						# #save predicted linear spectrogram to disk (debug)
+						# linear_filename = 'linear-prediction-step-{}.npy'.format(step)
+						# np.save(os.path.join(linear_dir, linear_filename), linear_prediction.T, allow_pickle=False)
+						#
+						# #save griffin lim inverted wav for debug (linear -> wav)
+						# if hparams.GL_on_GPU:
+						# 	wav = sess.run(GLGPU_lin_outputs, feed_dict={GLGPU_lin_inputs: linear_prediction})
+						# 	wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+						# else:
+						# 	wav = audio.inv_linear_spectrogram(linear_prediction.T, hparams)
+						# audio.save_wav(wav, os.path.join(wav_dir, 'step-{}-wave-from-linear.wav'.format(step)), sr=hparams.sample_rate)
+						#
+						# #Save real and predicted linear-spectrogram plot to disk (control purposes)
+						# plot.plot_spectrogram(linear_prediction, os.path.join(plot_dir, 'step-{}-linear-spectrogram.png'.format(step)),
+						# 	title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, loss), target_spectrogram=linear_target,
+						# 	max_len=target_length, auto_aspect=True)
 
 					else:
-						input_seq, mel_prediction, alignment, target, target_length = sess.run([
+						input_seq, mel_prediction, alignment, target, target_length, emt, spk = sess.run([
 							eval_model.tower_inputs[0][0],
 							eval_model.tower_mel_outputs[0][0],
 							eval_model.tower_alignments[0][0],
 							eval_model.tower_mel_targets[0][0],
 							eval_model.tower_targets_lengths[0][0],
+							eval_model.tower_emt_labels[0][0],
+							eval_model.tower_spk_labels[0][0],
 							])
 
 					#save predicted mel spectrogram to disk (debug)
 					mel_filename = 'mel-prediction-step-{}.npy'.format(step)
 					np.save(os.path.join(mel_dir, mel_filename), mel_prediction.T, allow_pickle=False)
+
+					folder_bucket = 'step_{}'.format(step//500)
+					folder_wavs_save = os.path.join(wav_dir,folder_bucket)
+					folder_plot_save = os.path.join(plot_dir,folder_bucket)
+					os.makedirs(folder_wavs_save, exist_ok=True)
+					os.makedirs(folder_plot_save, exist_ok=True)
 
 					#save griffin lim inverted wav for debug (mel -> wav)
 					if hparams.GL_on_GPU:
@@ -428,26 +517,27 @@ def train(log_dir, args, hparams):
 						wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
 					else:
 						wav = audio.inv_mel_spectrogram(mel_prediction.T, hparams)
-					audio.save_wav(wav, os.path.join(wav_dir, 'step-{}-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
+					audio.save_wav(wav, os.path.join(folder_wavs_save, 'step-{}-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
 
+					input_seq = sequence_to_text(input_seq)
 					#save alignment plot to disk (control purposes)
-					plot.plot_alignment(alignment, os.path.join(plot_dir, 'step-{}-align.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, loss),
+					plot.plot_alignment(alignment, os.path.join(folder_plot_save, 'step-{}-align.png'.format(step)),
+						title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
 						max_len=target_length // hparams.outputs_per_step)
 					#save real and predicted mel-spectrogram plot to disk (control purposes)
-					plot.plot_spectrogram(mel_prediction, os.path.join(plot_dir, 'step-{}-mel-spectrogram.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}'.format(args.model, time_string(), step, loss), target_spectrogram=target,
+					plot.plot_spectrogram(mel_prediction, os.path.join(folder_plot_save, 'step-{}-mel-spectrogram.png'.format(step)),
+						title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk), input_seq), target_spectrogram=target,
 						max_len=target_length)
-					log('Input at step {}: {}'.format(step, sequence_to_text(input_seq)))
+					log('Input at step {}: {}'.format(step, input_seq))
 
-				if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == 1:
-					#Get current checkpoint state
-					checkpoint_state = tf.train.get_checkpoint_state(save_dir)
-
-					#Update Projector
-					log('\nSaving Model Character Embeddings visualization..')
-					add_embedding_stats(summary_writer, [model.embedding_table.name], [char_embedding_meta], checkpoint_state.model_checkpoint_path)
-					log('Tacotron Character embeddings have been updated on tensorboard!')
+				# if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == 1:
+				# 	#Get current checkpoint state
+				# 	checkpoint_state = tf.train.get_checkpoint_state(save_dir)
+				#
+				# 	#Update Projector
+				# 	log('\nSaving Model Character Embeddings visualization..')
+				# 	add_embedding_stats(summary_writer, [model.embedding_table.name], [char_embedding_meta], checkpoint_state.model_checkpoint_path)
+				# 	log('Tacotron Character embeddings have been updated on tensorboard!')
 
 			log('Tacotron training complete after {} global steps!'.format(args.tacotron_train_steps), slack=True)
 			return save_dir

@@ -40,8 +40,8 @@ hparams = tf.contrib.training.HParams(
 
 	#Hardware setup: Default supposes user has only one GPU: "/gpu:0" (Both Tacotron and WaveNet can be trained on multi-GPU: data parallelization)
 	#Synthesis also uses the following hardware parameters for multi-GPU parallel synthesis.
-	tacotron_num_gpus = 1, #1, #Determines the number of gpus in use for Tacotron training.
-	tacotron_batch_size=32,  # number of training samples on each training steps
+	tacotron_num_gpus = 4, #1, #Determines the number of gpus in use for Tacotron training.
+	tacotron_batch_size=96,  # number of training samples on each training steps
 	wavenet_num_gpus = 1, #Determines the number of gpus in use for WaveNet training.
 	split_on_cpu = True, #Determines whether to split data on CPU or on first GPU. This is automatically True when more than 1 GPU is used. 
 		#(Recommend: False on slow CPUs/Disks, True otherwise for small speed boost)
@@ -95,7 +95,7 @@ hparams = tf.contrib.training.HParams(
 	trim_silence = True, #Whether to clip silence in Audio (at beginning and end of audio only, not the middle)
 	trim_fft_size = 2048, #Trimming window size
 	trim_hop_size = 512, #Trimmin hop length
-	trim_top_db = 30, #Trimming db difference from reference db (smaller==harder trim.)
+	trim_top_db = 15, #Trimming db difference from reference db (smaller==harder trim.)
 
 	#Mel and Linear spectrograms normalization/scaling and clipping
 	signal_normalization = True, #Whether to normalize mel spectrograms to some predefined range (following below parameters)
@@ -192,6 +192,7 @@ hparams = tf.contrib.training.HParams(
 	mask_decoder = False, #Whether to use loss mask for padded sequences (if False, <stop_token> loss function will not be weighted, else recommended pos_weight = 20)
 	cross_entropy_pos_weight = 1, #Use class weights to reduce the stop token classes imbalance (by adding more penalty on False Negatives (FN)) (1 = disabled)
 	predict_linear = False, #True, #Whether to add a post-processing network to the Tacotron to predict linear spectrograms (True mode Not tested!!)
+	unpaired_loss_derate = .1,#1 #how much to derate the unpaired loss
 	###########################################################################################################################################
 
 	#Wavenet
@@ -269,8 +270,8 @@ hparams = tf.contrib.training.HParams(
 
 	#Learning rate schedule
 	tacotron_decay_learning_rate = True, #boolean, determines if the learning rate will follow an exponential decay
-	tacotron_start_decay = 40000, #Step at which learning decay starts
-	tacotron_decay_steps = 18000, #Determines the learning rate decay slope (UNDER TEST)
+	tacotron_start_decay = 15000, #Step at which learning decay starts
+	tacotron_decay_steps = 10000, #Determines the learning rate decay slope (UNDER TEST)
 	tacotron_decay_rate = 0.5, #learning rate decay rate (UNDER TEST)
 	tacotron_initial_learning_rate = 1e-3, #starting learning rate
 	tacotron_final_learning_rate = 1e-4, #minimal learning rate
@@ -313,8 +314,7 @@ hparams = tf.contrib.training.HParams(
 	#style embeddings
 	tacotron_se_concat = True, #whether to concatenate the style embeddings to encoder outputs or add them to encoder outputs
 	tacotron_use_style_emb_disc = True, #whether to use a classifier on the style embeddings
-	tacotron_n_emt = 4, #how many emotion classes in training set
-	tacotron_n_spk = 252, #how many speakers  in training set (1 - emt4, 251 - librispeech clean speech 100)
+	tacotron_style_emb_disc_refnet = True,#False, #whether to do style discriminator on reference embeddings or output of the gst
 	tacotron_use_orthog_loss = True, #whether to use orthogonality loss between style embeddings
 	###########################################################################################################################################
 

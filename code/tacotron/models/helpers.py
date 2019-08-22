@@ -101,7 +101,7 @@ class TacoTrainingHelper(Helper):
 		#In GTA mode, override teacher forcing scheme to work with full teacher forcing
 		if self.gta:
 			self._ratio = tf.convert_to_tensor(1.) #Force GTA model to always feed ground-truth
-		elif self.eval and self._hparams.tacotron_natural_eval or self.unpaired:
+		elif self.eval and self._hparams.tacotron_natural_eval:
 			self._ratio = tf.convert_to_tensor(0.) #Force eval model to always feed predictions
 		else:
 			if self._hparams.tacotron_teacher_forcing_mode == 'scheduled':
@@ -117,12 +117,14 @@ class TacoTrainingHelper(Helper):
 		with tf.name_scope(name or 'TacoTrainingHelper'):
 			#synthesis stop (we let the model see paddings as we mask them when computing loss functions)
 			finished = (time + 1 >= self._lengths)
-
-			#Pick previous outputs randomly with respect to teacher forcing ratio
-			next_inputs = tf.cond(
-				tf.less(tf.random_uniform([], minval=0, maxval=1, dtype=tf.float32), self._ratio),
-				lambda: self._targets[:, time, :], #Teacher-forcing: return true frame
-				lambda: outputs[:,-self._output_dim:])
+			if self.unpaired:
+				next_inputs = tf.concat([self._targets[:self._batch_size//2, time, :], outputs[self._batch_size//2:, -self._output_dim:]],axis=0)
+			else:
+				# Pick previous outputs randomly with respect to teacher forcing ratio
+				next_inputs = tf.cond(
+					tf.less(tf.random_uniform([], minval=0, maxval=1, dtype=tf.float32), self._ratio),
+					lambda: self._targets[:, time, :],  # Teacher-forcing: return true frame
+					lambda: outputs[:, -self._output_dim:])
 
 			#Pass on state
 			next_state = state

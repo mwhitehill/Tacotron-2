@@ -1,8 +1,12 @@
 import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-
 import numpy as np
+
+if __name__ == '__main__':
+	import sys
+	sys.path.append(os.getcwd())
+
 from datasets import audio
 from wavenet_vocoder.util import is_mulaw, is_mulaw_quantize, mulaw, mulaw_quantize
 
@@ -42,10 +46,16 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 		for line in f:
 			parts = line.strip().split('|')
 			path = parts[0]
+			path = path + '.wav' if args.dataset == 'emt4' else path
 			audio_path = os.path.join(in_dir, path)
 			text = parts[1]
 			emt_label = parts[2]
-			spk_label = spk_ids.index(parts[3])+1 #reserving emt4 as spk label 0
+			if args.dataset == 'emth':
+				spk_label = -1
+			elif args.dataset == 'emt4':
+				spk_label = 0
+			else:
+				spk_label = spk_ids.index(parts[3])+1 #reserving emt4 as spk label 0
 			sex = parts[4]
 			if args.philly:
 				futures.append(_process_utterance(args.dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams))
@@ -187,3 +197,29 @@ def _process_utterance(dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, ind
 	basename = os.path.basename(audio_path)
 	# Return a tuple describing this training example
 	return (dataset, audio_filename, mel_filename, linear_filename, spk_emb_filename, time_steps, mel_frames, text, emt_label, spk_label, basename, sex)
+
+
+def test():
+	from hparams import hparams
+
+	audio_path = r'C:\Users\t-mawhit\Documents\data\VCTK-Corpus\wav48\p225\p225_001.wav'
+
+	dataset='vctk'
+	out_dir = os.path.join(folder_data, dataset+'_test_silence')
+	mel_dir = os.path.join(out_dir, 'mels')
+	os.makedirs(out_dir,exist_ok=True)
+	os.makedirs(mel_dir,exist_ok=True)
+	linear_dir=''
+	audio_dir=''
+	spk_emb_dir=''
+	index=1
+	text = ''
+	emt_label=0
+	spk_label = 0
+	sex = 'F'
+	_process_utterance(dataset, mel_dir, linear_dir, audio_dir, spk_emb_dir, index, audio_path, text, emt_label, spk_label, sex, hparams)
+
+
+
+if __name__ == '__main__':
+	test()
