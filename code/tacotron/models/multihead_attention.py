@@ -17,33 +17,24 @@ class MultiheadAttention():
      The concatenated attention context of each head.
   '''
   def __init__(self,
-               # query,
-               # value,
-               scope,
                num_heads=4,
                attention_type='mlp_attention',
                num_units=None,
-               normalize=True):
-    # self.query = query
-    # self.value = value
+               normalize=True,
+               scope=''):
     self.num_heads = num_heads
     self.attention_type = attention_type
     if num_units == None:
       raise ValueError ("must specify number of units for multihead attention")
     self.num_units = num_units # or query.get_shape().as_list()[-1]
     self.normalize = normalize
-    self.scope=scope
+    self.scope = "Multihead-attention-{}".format(scope)
 
-  # def multi_head_attention(self):
   def multi_head_attention(self, query, value):
     if self.num_units % self.num_heads != 0:
       raise ValueError("Multi head attention requires that num_units is a"
                        " multiple of {}".format(self.num_heads))
-
-    with tf.variable_scope("Multihead-attention-{}".format(self.scope)):
-      # q = tf.layers.conv1d(self.query, self.num_units, 1)
-      # k =  tf.layers.conv1d(self.value, self.num_units, 1)
-      # v = self.value
+    with tf.variable_scope(self.scope):
       q = tf.layers.conv1d(query, self.num_units, 1)
       k =  tf.layers.conv1d(value, self.num_units, 1)
       v = value

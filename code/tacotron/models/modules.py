@@ -1,14 +1,13 @@
 import tensorflow as tf
 
-
 class ReferenceEncoder:
-	def __init__(self, filters, kernel_size, strides, encoder_cell, is_training, scope):
+	def __init__(self, filters, kernel_size, strides, is_training, scope, depth):
 		self.filters = filters
 		self.kernel_size = kernel_size
 		self.strides = strides
-		self.encoder_cell = encoder_cell
 		self.is_training = is_training
 		self.scope = scope
+		self.depth = depth
 
 	def __call__(self, inputs):
 
@@ -24,7 +23,7 @@ class ReferenceEncoder:
 				shapes[:-2] + [shapes[2] * shapes[3]])
 			# RNN
 			encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
-				self.encoder_cell,
+				tf.nn.rnn_cell.GRUCell(self.depth),
 				ref_outputs,
 				dtype=tf.float32)
 

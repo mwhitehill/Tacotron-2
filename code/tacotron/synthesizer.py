@@ -17,7 +17,7 @@ from tacotron.utils.text import text_to_sequence
 
 
 class Synthesizer:
-	def load(self, checkpoint_path, hparams, gta=False, use_intercross=False, model_name='Tacotron'):
+	def load(self,args, checkpoint_path, hparams, gta=False, use_intercross=False, model_name='Tacotron'):
 		log('Constructing model: %s' % model_name)
 		#Force the batch size to be known in order to use attention masking in batch synthesis
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
@@ -31,11 +31,11 @@ class Synthesizer:
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
-				self.model.initialize(inputs, input_lengths, targets, gta=gta, split_infos=split_infos, use_intercross=use_intercross,
+				self.model.initialize(args, inputs, input_lengths, targets, gta=gta, split_infos=split_infos, use_intercross=use_intercross,
 															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk)
 			else:
-				self.model.initialize(inputs, input_lengths, split_infos=split_infos, use_intercross=use_intercross,
-															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk)
+				self.model.initialize(args, inputs, input_lengths, split_infos=split_infos, use_intercross=use_intercross,
+															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk, n_emt=4, n_spk=252)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -269,6 +269,9 @@ class Synthesizer:
 					wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
 				else:
 					wav = audio.inv_mel_spectrogram(mel.T, hparams)
+
+				#add silence to make ending of file more noticeable
+				wav = np.append(np.append(np.zeros(int(.5*hparams.sample_rate)), wav),np.zeros(int(.5*hparams.sample_rate)))
 				audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-mel_{}.wav'.format(basenames[i],basenames_refs[i])), sr=hparams.sample_rate)
 
 				#save alignments

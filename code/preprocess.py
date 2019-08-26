@@ -42,7 +42,7 @@ def norm_data(args):
 
 	print('Selecting data folders..')
 	# supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'M-AILABS']
-	supported_datasets = ['emt4','librispeech','vctk']
+	supported_datasets = ['emt4','librispeech','vctk', 'emth']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
@@ -53,6 +53,8 @@ def norm_data(args):
 		return ('LibriSpeech/train-clean-100')
 	elif args.dataset == 'vctk':
 		return ('')
+	elif args.dataset == 'emth':
+		return ('emotion')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
@@ -114,9 +116,11 @@ def main():
 	parser.add_argument('--folder_wav_dir', default='../../data/')
 	parser.add_argument('--TEST', default=False, action='store_true')
 	parser.add_argument('--philly', default=False, action='store_true')
+	parser.add_argument('--db', type=int, default=hparams.trim_top_db)
 	args = parser.parse_args()
 
 	modified_hp = hparams.parse(args.hparams)
+	modified_hp.trim_top_db = args.db
 
 	assert args.merge_books in ('False', 'True')
 

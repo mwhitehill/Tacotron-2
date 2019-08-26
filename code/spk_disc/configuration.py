@@ -4,7 +4,7 @@ import tensorflow as tf
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+tf.logging.set_verbosity(tf.logging.ERROR)
 
 parser = argparse.ArgumentParser()    # make parser
 
@@ -44,15 +44,15 @@ model_arg = parser.add_argument_group('Model')
 model_arg.add_argument('--hidden', type=int, default=768, help="hidden state dimension of lstm") #128 (for tdsv)
 model_arg.add_argument('--proj', type=int, default=256, help="projection dimension of lstm") #64 (for tdsv)
 model_arg.add_argument('--num_layer', type=int, default=3, help="number of lstm layers")
-model_arg.add_argument('--restore', type=str2bool, default=False, help="restore model or not")
+# model_arg.add_argument('--restore', type=str2bool, default=False, help="restore model or not")
 model_arg.add_argument('--model_path', type=str, default='../tisv_model', help="model directory to save or load")
 model_arg.add_argument('--model_num', type=int, default=6, help="number of ckpt file to load")
 
 # Training Parameters
 train_arg = parser.add_argument_group('Training')
 train_arg.add_argument('--train', type=str2bool, default=False, help="train session or not(test session)")
-train_arg.add_argument('--N', type=int, default=4, help="number of speakers of batch")
-train_arg.add_argument('--M', type=int, default=5, help="number of utterances per speaker")
+# train_arg.add_argument('--N', type=int, default=4, help="number of speakers of batch")
+# train_arg.add_argument('--M', type=int, default=5, help="number of utterances per speaker")
 train_arg.add_argument('--noise_filenum', type=int, default=16, help="how many noise files will you use")
 train_arg.add_argument('--loss', type=str, default='softmax', help="loss type (softmax or contrast)")
 train_arg.add_argument('--optim', type=str.lower, default='sgd', help="optimizer type") #"sgd"
@@ -61,7 +61,7 @@ train_arg.add_argument('--beta1', type=float, default=0.5, help="beta1")
 train_arg.add_argument('--beta2', type=float, default=0.9, help="beta2")
 train_arg.add_argument('--iteration', type=int, default=100000, help="max iteration")
 train_arg.add_argument('--comment', type=str, default='', help="any comment")
-train_arg.add_argument('--save_checkpoint_iters', type=int, default=1, help="how often to save model")
+train_arg.add_argument('--save_checkpoint_iters', type=int, default=100, help="how often to save model")
 train_arg.add_argument('--decay_lr_iters', type=int, default=10000, help="how often to decay lr")
 
 

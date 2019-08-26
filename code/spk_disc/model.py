@@ -2,10 +2,16 @@ import tensorflow as tf
 import numpy as np
 import os
 import time
-from utils import random_batch, normalize, similarity, loss_cal, optim
+from utils import Feeder, normalize, similarity, loss_cal, optim
 from configuration import get_config
+import sys
+sys.path.append(os.getcwd())
+from tacotron.models.modules import ReferenceEncoder
+from tacotron.utils import ValueWindow
 from tensorflow.contrib import rnn
 import datetime
+from hparams import hparams
+import pandas as pd
 
 config = get_config()
 
@@ -26,23 +32,30 @@ def triple_lstm(batch):
 
     return(embedded)
 
-def train(path):
+def train(path, args):
     tf.reset_default_graph()    # reset graph
-    timestamp = time_string()
+    timestamp = time_string() if args.time_string == None else args.time_string
 
     # draw graph
-    batch = tf.placeholder(shape= [None, config.N*config.M, config.n_mels], dtype=tf.float32)  # input batch (time x batch x n_mel)
+    feeder = Feeder(args.train_filename, args, hparams)
+
+    batch = tf.placeholder(shape= [args.N*args.M, None, config.n_mels], dtype=tf.float32)  # input batch (time x batch x n_mel)
     lr = tf.placeholder(dtype= tf.float32)  # learning rate
     global_step = tf.Variable(0, name='global_step', trainable=False)
     w = tf.get_variable("w", initializer= np.array([10], dtype=np.float32))
     b = tf.get_variable("b", initializer= np.array([-5], dtype=np.float32))
 
-    embedded = triple_lstm(batch)
+    # embedded = triple_lstm(batch)
+    print("Training {} Discriminator Model".format(args.model_type))
+    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
+                               strides=(2, 2),
+                               is_training=True, scope='reference_encoder', depth=hparams.reference_depth)  # [N, 128])
+    embedded = encoder(batch)
 
     # loss
-    sim_matrix = similarity(embedded, w, b)
+    sim_matrix = similarity(embedded, w, b, args.N, args.M, P=hparams.reference_depth)
     print("similarity matrix size: ", sim_matrix.shape)
-    loss = loss_cal(sim_matrix, type=config.loss)
+    loss = loss_cal(sim_matrix, args.N, args.M, type=config.loss)
 
     # optimizer operation
     trainable_vars= tf.trainable_variables()                # get variable list
@@ -60,6 +73,7 @@ def train(path):
     loss_summary = tf.summary.scalar("loss", loss)
     merged = tf.summary.merge_all()
     saver = tf.train.Saver(max_to_keep=20)
+    loss_window = ValueWindow(100)
 
     # training session
     with tf.Session() as sess:
@@ -69,85 +83,111 @@ def train(path):
         logs_folder = os.path.join(path, "logs", timestamp)
         os.makedirs(checkpoint_folder, exist_ok=True)  # make folder to save model
         os.makedirs(logs_folder, exist_ok=True)        # make folder to save log
+        model_name = '{}_disc_model.ckpt'.format(args.model_type)
+        checkpoint_path = os.path.join(checkpoint_folder, model_name)
+
+        if args.restore:
+            checkpoint_state = tf.train.get_checkpoint_state(checkpoint_folder)
+            if (checkpoint_state and checkpoint_state.model_checkpoint_path):
+                print('Loading checkpoint {}'.format(checkpoint_state.model_checkpoint_path))
+                saver.restore(sess, checkpoint_state.model_checkpoint_path)
+            else:
+                print('No model to load at {}'.format(checkpoint_folder))
+                saver.save(sess, checkpoint_path, global_step=global_step)
+        else:
+            print('Starting new training!')
+            saver.save(sess, checkpoint_path, global_step=global_step)
+
 
         writer = tf.summary.FileWriter(logs_folder, sess.graph)
         lr_factor = 1   # lr decay factor ( 1/2 per 10000 iteration)
-        loss_acc = 0    # accumulated loss ( for running average of loss)
 
         for iter in range(config.iteration):
             # run forward and backward propagation and update parameters
-            _, loss_cur, summary = sess.run([train_op, loss, merged],
-                                  feed_dict={batch: random_batch(), lr: config.lr*lr_factor})
-            print("iter:", iter, "loss:", loss_cur)
+            step, _, loss_cur, summary = sess.run([global_step, train_op, loss, merged],
+                                  feed_dict={batch: feeder.random_batch()[0], lr: config.lr*lr_factor})
 
-            loss_acc += loss_cur    # accumulated loss for each 100 iteration
+            loss_window.append(loss_cur)
 
-            if iter % 10 == 0:
-                writer.add_summary(summary, iter)   # write at tensorboard
-            if (iter+1) % 20 == 0:
-                print("(iter : %d) loss: %.4f" % ((iter+1),loss_acc/20))
-                loss_acc = 0                        # reset accumulated loss
-            if (iter+1) % config.decay_lr_iters == 0:
-                lr_factor /= 2                      # lr decay
-                print("learning rate is decayed! current lr : ", config.lr*lr_factor)
-            if (iter+1) % config.save_checkpoint_iters == 0:
-                saver.save(sess, os.path.join(checkpoint_folder, "model.ckpt"), global_step=iter)
-                print("model is saved!")
+            if step % 10 == 0:
+                writer.add_summary(summary, step)   # write at tensorboard
+            if (step+1) % 20 == 0:
+                print("(iter : %d) loss: %.4f" % ((step+1),loss_window.average))
 
-def get_embedding(mel_spec):
+            lr_changed=False
+            if args.model_type == 'emt':
+                if step > 6000:
+                    lr_changed = True if lr_factor != .01 else False
+                    lr_factor = .01
+                elif step > 4000:
+                    lr_changed = True if lr_factor != .1 else False
+                    lr_factor = .1
+                if lr_changed:
+                    print("learning rate is decayed! current lr : ", config.lr * lr_factor)
+            elif args.model_type == 'spk':
+                if step > 4000:
+                    lr_changed = True if lr_factor != .01 else False
+                    lr_factor = .01
+                elif step > 2500:
+                    lr_changed = True if lr_factor != .1 else False
+                    lr_factor = .1
+                if lr_changed:
+                    print("learning rate is decayed! current lr : ", config.lr * lr_factor)
+            if step % config.save_checkpoint_iters == 0:
+                saver.save(sess, checkpoint_path, global_step=global_step)
+
+def get_embeddings(path, args):
+    tf.reset_default_graph()    # reset graph
+    if args.time_string == None:
+        raise ValueError('must provide valid time_string')
+
+    emb_dir = os.path.join(path, 'embeddings')
+    os.makedirs(emb_dir, exist_ok=True)
+    meta_path = os.path.join(emb_dir, 'meta.tsv')
+
+    emb_path = os.path.join(emb_dir, 'emb_emt.tsv') if args.model_type == 'emt' else os.path.join(emb_dir, 'emb_spk.tsv')
 
 
+    # draw graph
+    feeder = Feeder(args.train_filename, args, hparams)
+    datasets = ['emt4','vctk'] if args.model_type =='emt' else ['vctk']
+    num_datasets = len(datasets)
 
-# Get Embedding for an input
-def embedding_model(batch):
-    embedded = triple_lstm(batch)
-    return(embedded)
+    batch = tf.placeholder(shape= [num_datasets * args.N*args.M, None, config.n_mels], dtype=tf.float32)  # input batch (time x batch x n_mel)
+    w = tf.get_variable("w", initializer= np.array([10], dtype=np.float32))
+    b = tf.get_variable("b", initializer= np.array([-5], dtype=np.float32))
 
-def get_embedding_test(MODEL_PATH):
+    # embedded = triple_lstm(batch)
+    print("{} Discriminator Model".format(args.model_type))
+    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
+                               strides=(2, 2), is_training=True, scope='reference_encoder',
+                               depth=hparams.reference_depth)  # [N, 128])
+    embedded = encoder(batch)
 
-    tf.reset_default_graph()
-    batch = tf.placeholder(shape=[None, config.N * config.M, config.n_mels], dtype=tf.float32)
-    get_embedding = embedding_model(batch)
+    # loss
+    sim_matrix = similarity(embedded, w, b, num_datasets*args.N, args.M, P=hparams.reference_depth)
+    print("similarity matrix size: ", sim_matrix.shape)
+    loss = loss_cal(sim_matrix, num_datasets * args.N, args.M, type=config.loss)
 
+    saver = tf.train.Saver()
+
+    # training session
     with tf.Session() as sess:
         tf.global_variables_initializer().run()
-        vars_to_restore = [v for v in tf.global_variables() if v.name.split('/')[0] == 'spk_emb_lstm']
 
-        saver_spk_emb = tf.train.Saver(var_list=vars_to_restore)
-        saver_spk_emb.restore(sess, MODEL_PATH)
+        checkpoint_folder = os.path.join(path, "checkpoints",args.time_string)
 
-        test_batch = np.zeros([140,config.N*config.M, config.n_mels])
-        embedded = sess.run(get_embedding,feed_dict={batch:test_batch})
-        print(embedded.shape)
-
-# def get_embeddings_from_csv():
-#
-# 	list_file = r'data/embedding/file_list.csv'
-# 	emb_file = r'data/embedding/embedding.tsv'
-# 	meta_file = r'data/embedding/metadata.tsv'
-#
-# 	print("Loading model weights from [{}]....".format(WEIGHTS_FILE))
-# 	model = vggvox_model()
-# 	model.load_weights(WEIGHTS_FILE)
-# 	# model.summary()
-#
-# 	print("Processing samples....")
-# 	buckets = build_buckets(MAX_SEC, BUCKET_STEP, FRAME_STEP)
-# 	meta = pd.read_csv(list_file, delimiter=",")
-# 	result = meta.copy()
-# 	result['features'] = result['filename'].apply(lambda x: get_fft_spectrum(x, buckets))
-# 	result['embedding'] = result['features'].apply(lambda x: np.squeeze(model.predict(x.reshape(1,*x.shape,1))))
-#
-# 	#expand list to columns
-# 	embs = result['embedding'].apply(pd.Series)
-#
-# 	#get just filename, not full path
-# 	meta['filename'] = meta['filename'].apply(lambda x: repr(x).split(r'\\')[-1][:-1])
-#
-# 	#print to csv for use with the tensorflow embedding projector - https://projector.tensorflow.org/
-# 	embs.to_csv(emb_file,sep='\t',index=False,header=False)
-# 	meta.to_csv(meta_file, sep='\t',index=False)
-
+        checkpoint_state = tf.train.get_checkpoint_state(checkpoint_folder)
+        if (checkpoint_state and checkpoint_state.model_checkpoint_path):
+            print('Loading checkpoint {}'.format(checkpoint_state.model_checkpoint_path))
+            saver.restore(sess, checkpoint_state.model_checkpoint_path)
+        else:
+            raise ValueError('No model to load at {}'.format(checkpoint_folder))
+        feeder_batch, meta = feeder.emb_batch(make_meta=True, datasets=datasets)
+        emb, loss = sess.run([embedded, loss], feed_dict={batch: feeder_batch})
+        print("loss: {:.4f}".format(loss))
+        meta.to_csv(meta_path, sep='\t', index=False)
+        pd.DataFrame(emb).to_csv(emb_path, sep='\t', index=False, header=False)
 
 # Test Session
 def test(path):
@@ -229,13 +269,30 @@ def test(path):
 
 if __name__ == "__main__":
 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--N', type=int, default=4, help='Number groups')
+    parser.add_argument('--M', type=int, default=5, help='Number utterances per group')
+    parser.add_argument('--remove_long_samps', action='store_true', default=False,
+                        help='Will remove out the longest samples from EMT4/VCTK')
+    parser.add_argument('--test_max_len', action='store_true', default=False,
+                        help='Will create batches with the longest samples first to test max batch size')
+    parser.add_argument('--TEST', action='store_true', default=False,
+                        help='Uses small groups of batches to make testing faster')
+    parser.add_argument('--train_filename', default='../data/train_emt4_vctk_e40_v15.txt')
+    parser.add_argument('--model_type', default='emt', help='Options = emt or spk')
+    parser.add_argument('--time_string', default=None, help='time string of previous saved model')
+    args = parser.parse_args()
+
+    args.M=10
+    get_embeddings(config.model_path, args)
+
     # folder = r'C:\Users\t-mawhit\Documents\code\Speaker_Verification\tisv_model\checkpoints\2019.07.18_17-13-28'
     # MODEL_PATH = tf.train.get_checkpoint_state(checkpoint_dir=folder).all_model_checkpoint_paths[-1]
     # get_embedding_test(MODEL_PATH)
 
-    mel_spec_test = np.zeros()
-    get_embedding_preprocess(mel_spec)
+    # mel_spec_test = np.zeros()
+    # get_embedding_preprocess(mel_spec)
 
     # None, config.N * config.M, config.n_mels]
-
-
+    pass

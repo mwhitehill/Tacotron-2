@@ -5,9 +5,19 @@ import librosa
 import matplotlib.pyplot as plt
 import random
 from configuration import get_config
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+if __name__ == '__main__':
+    import sys
+    sys.path.append(os.getcwd())
+    import argparse
+    from hparams import hparams
 
 config = get_config()
-
+TEST_SIZE =.05
+RANDOM_STATE = 0
+columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
 
 def keyword_spot(spec):
     """ Keyword detection for data preprocess
@@ -17,8 +27,10 @@ def keyword_spot(spec):
     return spec[:, -config.tdsv_frame:]
 
 
-def random_batch(speaker_num=config.N, utter_num=config.M, shuffle=True, noise_filenum=None, utter_start=0,
-                 TEST=False):
+def random_batch_old(speaker_num=4,#config.N,
+                     utter_num=5, #config.M,
+                     shuffle=True, noise_filenum=None, utter_start=0,
+                     TEST=False):
     """ Generate 1 batch.
         For TD-SV, noise is added to each utterance.
         For TI-SV, random frame length is applied to each batch of utterances (140-180 frames)
@@ -114,7 +126,7 @@ def cossim(x,y, normalized=True):
         return tf.reduce_sum(x*y)/x_norm/y_norm
 
 
-def similarity(embedded, w, b, N=config.N, M=config.M, P=config.proj, center=None):
+def similarity(embedded, w, b, N, M, P=config.proj, center=None):
     """ Calculate similarity matrix from embedded utterance batch (NM x embed_dim) eq. (9)
         Input center to test enrollment. (embedded for verification)
     :return: tf similarity matrix (NM x N)
@@ -141,7 +153,7 @@ def similarity(embedded, w, b, N=config.N, M=config.M, P=config.proj, center=Non
     return S
 
 
-def loss_cal(S, type="softmax", N=config.N, M=config.M):
+def loss_cal(S, N, M, type="softmax"):
     """ calculate loss with similarity matrix(S) eq.(6) (7) 
     :type: "softmax" or "contrast"
     :return: loss
@@ -176,15 +188,191 @@ def optim(lr):
         raise AssertionError("Wrong optimizer type!")
 
 
+
+
+class Feeder:
+    """
+      Feeds batches of data into queue on a background thread.
+    """
+
+    def __init__(self, metadata_filename, args, hparams):
+        super(Feeder, self).__init__()
+
+        self.args = args
+        self.hparams = hparams
+
+        # Load metadata
+        self.data_folder = os.path.dirname(metadata_filename)
+
+        with open(metadata_filename, encoding='utf-8') as f:
+            self._metadata = [line.strip().split('|') for line in f]
+            if args.remove_long_samps:
+                len_before = len(self._metadata)
+                # remove the 2 longest utterances + any over 900 frames long
+                self._metadata = [f for f in self._metadata if not (f[10].endswith('_023.wav'))]
+                self._metadata = [f for f in self._metadata if not (f[10].endswith('_021.wav'))]
+                self._metadata = [f for f in self._metadata if int(f[6]) < 500]
+                print("Removed Long Samples")
+                print("# samps before:", len_before)
+                print("# samps after:", len(self._metadata))
+            frame_shift_ms = config.hop / config.sr
+            hours = sum([int(x[6]) for x in self._metadata]) * frame_shift_ms / (3600)
+            print('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
+
+        # self._metadata_df = get_metadata_df(metadata_filename, args)
+        self._metadata_df = pd.DataFrame(self._metadata)
+        columns = ['dataset', 'audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps',
+                   'mel_frames', 'text', 'emt_label', 'spk_label', 'basename', 'sex']
+        self._metadata_df.columns = columns
+
+        indices = np.arange(len(self._metadata))
+        train_indices, test_indices = train_test_split(indices,test_size=TEST_SIZE,random_state=RANDOM_STATE)
+
+        # Make sure test_indices is a multiple of batch_size else round down
+        len_test_indices = self._round_down(len(test_indices), args.N * args.M)
+        extra_test = test_indices[len_test_indices:]
+        test_indices = test_indices[:len_test_indices]
+        train_indices = np.concatenate([train_indices, extra_test])
+
+        self._train_meta = list(np.array(self._metadata)[train_indices])
+        self._test_meta = list(np.array(self._metadata)[test_indices])
+
+        if args.test_max_len:
+            self._train_meta.sort(key=lambda x: int(x[6]), reverse=True)
+            self._test_meta.sort(key=lambda x: int(x[6]), reverse=True)
+            print("TESTING MAX LENGTH FOR SAMPLES TO FIND MAX BATCH SIZE")
+
+        self._metadata_df['train_test'] = 'train'
+        self._metadata_df.iloc[np.array(sorted(test_indices)) - 1, -1] = 'test'
+        self.df_meta_train = self._metadata_df[self._metadata_df.loc[:, 'train_test'] == 'train']
+        self.df_meta_test = self._metadata_df[self._metadata_df.loc[:, 'train_test'] == 'test']
+
+        self.total_emt = self._metadata_df.emt_label.unique()
+        self.total_spk = self._metadata_df.spk_label.unique()
+
+        if hparams.symmetric_mels:
+            self._target_pad = -hparams.max_abs_value
+        else:
+            self._target_pad = 0.
+
+    def random_batch(self, TEST=False, make_meta=False):
+        mels = []
+        df = self.df_meta_test if TEST else self.df_meta_train
+        if self.args.model_type == 'emt':
+            labels = np.random.choice(self.total_emt, self.args.N, replace=False)
+            #just use the emotion dataset
+            df = df[df['dataset'] == 'emt4']
+            # df = df[df['dataset'].isin(['emt4', 'emth'])]
+
+        elif self.args.model_type == 'spk':
+            labels = np.random.choice(self.total_spk, self.args.N, replace=False)
+        else:
+            raise ValueError('invalid discriminator type - must be emt or spk')
+        label_type = '{}_label'.format(self.args.model_type)
+
+        idxs_all = []
+        for label in labels:
+            # df_meta_same_style = self.df_meta_train[self.df_meta_train['dataset'].isin(['emt4', 'emth'])]
+            df_meta_same_style = df[df[label_type] == label]
+
+            # select M mels from same style to use as reference
+            idxs = np.random.choice(df_meta_same_style.index, self.args.M)
+            idxs_all += list(idxs)
+            for idx in idxs:
+                mel_name_same_style = df_meta_same_style.loc[idx, 'mel_filename']
+                dataset_same_style = df_meta_same_style.loc[idx, 'dataset']
+                mels.append(np.load(os.path.join(self.data_folder, dataset_same_style, 'mels', mel_name_same_style)))
+
+        mels, max_len = self._prepare_targets(mels, self.hparams.outputs_per_step)
+        meta = df.loc[idxs_all, columns_to_keep] if make_meta else None
+
+        return(mels, meta)
+
+    def emb_batch(self, datasets, TEST=False, make_meta=False):
+        mels = []
+        df = self.df_meta_test if TEST else self.df_meta_train
+        if self.args.model_type == 'emt':
+            labels = np.random.choice(self.total_emt, self.args.N, replace=False)
+            #just use the emotion dataset
+            df = df[df['dataset'].isin(datasets)]
+        elif self.args.model_type == 'spk':
+            labels = np.random.choice(self.total_spk, self.args.N, replace=False)
+        else:
+            raise ValueError('invalid discriminator type - must be emt or spk')
+        label_type = '{}_label'.format(self.args.model_type)
+
+        idxs_all = []
+        for dset in datasets:
+            if dset =='vctk':
+                labels = np.array(['0','0','0','0'])#
+            df_dataset = df[df['dataset'] == dset]
+
+            for label in labels:
+                # df_meta_same_style = self.df_meta_train[self.df_meta_train['dataset'].isin(['emt4', 'emth'])]
+                df_meta_same_style = df_dataset[df_dataset[label_type] == label]
+
+                # select M mels from same style to use as reference
+                idxs = np.random.choice(df_meta_same_style.index, self.args.M)
+                idxs_all += list(idxs)
+                for idx in idxs:
+                    mel_name_same_style = df_meta_same_style.loc[idx, 'mel_filename']
+                    dataset_same_style = df_meta_same_style.loc[idx, 'dataset']
+                    mels.append(np.load(os.path.join(self.data_folder, dataset_same_style, 'mels', mel_name_same_style)))
+
+        mels, max_len = self._prepare_targets(mels, self.hparams.outputs_per_step)
+        meta = df.loc[idxs_all, columns_to_keep] if make_meta else None
+
+        return(mels, meta)
+
+    def _prepare_targets(self, targets, alignment):
+        max_len = max([len(t) for t in targets])
+        data_len = self._round_up(max_len, alignment)
+        return np.stack([self._pad_target(t, data_len) for t in targets]), data_len
+
+    def _round_down(self, x, multiple):
+        remainder = x % multiple
+        return x if remainder == 0 else x - remainder
+
+    def _round_up(self, x, multiple):
+        remainder = x % multiple
+        return x if remainder == 0 else x + multiple - remainder
+
+    def _pad_target(self, t, length):
+        return np.pad(t, [(0, length - t.shape[0]), (0, 0)], mode='constant', constant_values=self._target_pad)
+
 # for check
 if __name__ == "__main__":
-    random_batch(TEST=True)
-    w= tf.constant([1], dtype= tf.float32)
-    b= tf.constant([0], dtype= tf.float32)
-    embedded = tf.constant([[0,1,0],[0,0,1], [0,1,0], [0,1,0], [1,0,0], [1,0,0]], dtype= tf.float32)
-    sim_matrix = similarity(embedded,w,b,3,2,3)
-    loss1 = loss_cal(sim_matrix, type="softmax",N=3,M=2)
-    loss2 = loss_cal(sim_matrix, type="contrast",N=3,M=2)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--N', type=int, default=4, help='Number groups')
+    parser.add_argument('--M', type=int, default=5, help='Number utterances per group')
+    parser.add_argument('--remove_long_samps', action='store_true', default=False,
+                        help='Will remove out the longest samples from EMT4/VCTK')
+    parser.add_argument('--test_max_len', action='store_true', default=False,
+                        help='Will create batches with the longest samples first to test max batch size')
+    parser.add_argument('--TEST', action='store_true', default=False,
+                        help='Uses small groups of batches to make testing faster')
+    parser.add_argument('--train_filename', default='../data/train_emt4_vctk_e40_v15.txt')
+    parser.add_argument('--model_type', default='emt', help='Options = emt or spk')
+    parser.add_argument('--time_string', default=None, help='time string of previous saved model')
+    parser.add_argument('--restore', action='store_true', default=False,
+                        help='whether to restore the model')
+    args = parser.parse_args()
+    args.remove_long_samps = False  # True
+    args.test_max_len = False  # True
+    args.TEST = True
+    args.model_type = 'spk'
+
+    feeder = Feeder('../data/train_emt4_vctk_e40_v15.txt', args, hparams)
+    mels, meta = feeder.random_batch(TEST=False, make_meta=True)
+    # print(meta)
+    print(mels.shape)
+
+    # w= tf.constant([1], dtype= tf.float32)
+    # b= tf.constant([0], dtype= tf.float32)
+    # embedded = tf.constant([[0,1,0],[0,0,1], [0,1,0], [0,1,0], [1,0,0], [1,0,0]], dtype= tf.float32)
+    # sim_matrix = similarity(embedded,w,b,3,2,3)
+    # loss1 = loss_cal(sim_matrix, type="softmax",N=3,M=2)
+    # loss2 = loss_cal(sim_matrix, type="contrast",N=3,M=2)
     # with tf.Session() as sess:
     #     print(sess.run(sim_matrix))
     #     print(sess.run(loss1))

@@ -94,7 +94,7 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, gta=GTA)
+	synth.load(args, checkpoint_path, hparams, gta=GTA)
 	with open(args.metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
@@ -110,15 +110,17 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	mel_ref_filenames_emt = []
 	mel_ref_filenames_spk = []
 	for m in metadata:
-			if m[12] == 'same':
-				mel_ref_filenames_emt.append(os.path.join(args.input_dir, m[0], 'mels', m[2]))
-			else:
-				mel_ref_filenames_emt.append(os.path.join(args.input_dir, 'emt4', 'mels', m[12]))
+		dataset = m[0]
+		if m[12] == 'same':
+			mel_ref_filenames_emt.append(os.path.join(args.input_dir, m[0], 'mels', m[2]))
+		else:
+			dataset_emt = 'emth' if dataset in ['emth'] else 'emt4'
+			mel_ref_filenames_emt.append(os.path.join(args.input_dir, dataset_emt , 'mels', m[12]))
 
-			if m[14] == 'same':
-				mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
-			else:
-				mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'vctk', 'mels', m[14]))
+		if m[14] == 'same':
+			mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
+		else:
+			mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'vctk', 'mels', m[14]))
 
 	mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
 																											 basenames_refs=basenames_refs,
@@ -137,7 +139,7 @@ def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
 	with open(args.train_filename , encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
 
-	df_meta = get_metadata_df(args.train_filename)
+	df_meta = get_metadata_df(args.train_filename, args)
 
 	spk_ids = df_meta.spk_label.unique()
 	spk_ids_chosen = np.sort(np.random.choice(spk_ids,args.n_spk))
@@ -162,7 +164,7 @@ def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
 	texts = list(df_meta_chosen.text)
 
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams)
+	synth.load(args, checkpoint_path, hparams)
 	print("getting embedding for {} samples".format(len(mel_filenames)))
 
 	emb_emt, emb_spk = synth.synthesize(texts, None, None, None, mel_filenames,
@@ -214,12 +216,17 @@ def test():
 	parser.add_argument('--GTA', default='False', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
 	parser.add_argument('--checkpoint', default=None, help='vary the emotion, speaker id, or neither')
 	parser.add_argument('--intercross', action='store_true', default=False, help='whether to use intercross training')
+	parser.add_argument('--recon_emb_loss', action='store_true', default=False,
+											help='Adds loss for reconstructing embeddings')
+	parser.add_argument('--remove_long_samps', action='store_true', default=False, help='removes long samples')
 	args = parser.parse_args()
 
 
 	#set manually
 	datasets = 'emt4_vctk'
-	model_suffix = '2conds_{}'.format(datasets)
+	suffix = '_e40_v15'
+	suffix_logs = '_e40_v15'
+	model_suffix = '2conds_{}{}'.format(datasets,suffix_logs)
 	args.mode = 'synthesis' #'style_embs' #'synthesis'
 
 	#MODEL SETTINGS
@@ -237,8 +244,8 @@ def test():
 	args.GTA=False
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
-	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test_{}.txt'.format(datasets))
-	args.train_filename = os.path.join(one_up_dir, 'data/train_{}.txt'.format(datasets))
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test.txt')
+	args.train_filename = os.path.join(one_up_dir, 'data/train_{}{}.txt'.format(datasets,suffix))
 	hparams.tacotron_gst_concat = concat
 	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
 

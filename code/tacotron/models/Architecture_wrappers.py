@@ -171,10 +171,7 @@ class TacotronDecoderCell(RNNCell):
 		prenet_output = self._prenet(inputs)
 
 		#Concat context vector and prenet output to form LSTM cells input (input feeding)
-		if spk_emb is not None and emt_label is not None:
-			LSTM_input = tf.concat([prenet_output, state.attention, spk_emb, tf.reshape(emt_label,[-1,1])], axis=-1)
-		else:
-			LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
+		LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
 
 		#Unidirectional LSTM layers
 		LSTM_output, next_cell_state = self._cell(LSTM_input, state.cell_state)
