@@ -215,6 +215,12 @@ class Feeder:
                 print("Removed Long Samples")
                 print("# samps before:", len_before)
                 print("# samps after:", len(self._metadata))
+            if args.model_type == 'accent':
+                len_before = len(self._metadata)
+                self._metadata = [f for f in self._metadata if (int(f[8]) in [0,2,3,5,8])]
+                print("Kept only 5 largest accents: American, Canadian, English, Irish, Scottish")
+                print("# samps before:", len_before)
+                print("# samps after:", len(self._metadata))
             frame_shift_ms = config.hop / config.sr
             hours = sum([int(x[6]) for x in self._metadata]) * frame_shift_ms / (3600)
             print('Loaded metadata for {} examples ({:.2f} hours)'.format(len(self._metadata), hours))
@@ -263,14 +269,19 @@ class Feeder:
             #just use the emotion dataset
             df = df[df['dataset'] == 'emt4']
             # df = df[df['dataset'].isin(['emt4', 'emth'])]
-
+            model_label = 'emt'
         elif self.args.model_type == 'spk':
             labels = np.random.choice(self.total_spk, self.args.N, replace=False)
+            model_label = 'spk'
+        elif self.args.model_type == 'accent':
+            labels = np.random.choice(self.total_emt, self.args.N, replace=False)
+            model_label = 'emt'
         else:
             raise ValueError('invalid discriminator type - must be emt or spk')
-        label_type = '{}_label'.format(self.args.model_type)
+        label_type = '{}_label'.format(model_label)
 
         idxs_all = []
+        labels_all = []
         for label in labels:
             # df_meta_same_style = self.df_meta_train[self.df_meta_train['dataset'].isin(['emt4', 'emth'])]
             df_meta_same_style = df[df[label_type] == label]
@@ -282,11 +293,44 @@ class Feeder:
                 mel_name_same_style = df_meta_same_style.loc[idx, 'mel_filename']
                 dataset_same_style = df_meta_same_style.loc[idx, 'dataset']
                 mels.append(np.load(os.path.join(self.data_folder, dataset_same_style, 'mels', mel_name_same_style)))
+                labels_all.append(int(label))
 
         mels, max_len = self._prepare_targets(mels, self.hparams.outputs_per_step)
         meta = df.loc[idxs_all, columns_to_keep] if make_meta else None
 
-        return(mels, meta)
+        return(mels, meta, np.array(labels_all))
+
+    def random_batch_disc(self, TEST=False, make_meta=False):
+        mels = []
+        df = self.df_meta_test if TEST else self.df_meta_train
+
+        if self.args.model_type == 'emt':
+            #just use the emotion dataset
+            df = df[df['dataset'] == 'emt4']
+            # df = df[df['dataset'].isin(['emt4', 'emth'])]
+            model_label = 'emt'
+        elif self.args.model_type == 'spk':
+            model_label = 'spk'
+        elif self.args.model_type == 'accent':
+            model_label = 'emt'
+        else:
+            raise ValueError('invalid discriminator type - must be emt or spk')
+
+        label_type = '{}_label'.format(model_label)
+        labels_all = []
+
+        idxs = np.random.choice(df.index,self.args.N*self.args.M,replace=False)
+
+        for idx in idxs:
+            mel_name_same_style = df.loc[idx, 'mel_filename']
+            dataset_same_style = df.loc[idx, 'dataset']
+            mels.append(np.load(os.path.join(self.data_folder, dataset_same_style, 'mels', mel_name_same_style)))
+            labels_all.append(int(df.loc[idx, label_type]))
+
+        mels, max_len = self._prepare_targets(mels, self.hparams.outputs_per_step)
+        meta = df.loc[idxs, columns_to_keep] if make_meta else None
+
+        return(mels, meta, np.array(labels_all))
 
     def emb_batch(self, datasets, TEST=False, make_meta=False):
         mels = []
@@ -363,10 +407,10 @@ if __name__ == "__main__":
     args.model_type = 'spk'
 
     feeder = Feeder('../data/train_emt4_vctk_e40_v15.txt', args, hparams)
-    mels, meta = feeder.random_batch(TEST=False, make_meta=True)
+    mels, meta, labels = feeder.random_batch(TEST=False, make_meta=True)
     # print(meta)
-    print(mels.shape)
-
+    # print(mels.shape)
+    print(labels)
     # w= tf.constant([1], dtype= tf.float32)
     # b= tf.constant([0], dtype= tf.float32)
     # embedded = tf.constant([[0,1,0],[0,0,1], [0,1,0], [0,1,0], [1,0,0], [1,0,0]], dtype= tf.float32)

@@ -21,7 +21,8 @@ class MultiheadAttention():
                attention_type='mlp_attention',
                num_units=None,
                normalize=True,
-               scope=''):
+               scope='',
+               value=None):
     self.num_heads = num_heads
     self.attention_type = attention_type
     if num_units == None:
@@ -29,8 +30,12 @@ class MultiheadAttention():
     self.num_units = num_units # or query.get_shape().as_list()[-1]
     self.normalize = normalize
     self.scope = "Multihead-attention-{}".format(scope)
+    self.value = value
 
-  def multi_head_attention(self, query, value):
+  def multi_head_attention(self, query, value=None):
+
+    value = self.value if self.value is not None else value
+
     if self.num_units % self.num_heads != 0:
       raise ValueError("Multi head attention requires that num_units is a"
                        " multiple of {}".format(self.num_heads))

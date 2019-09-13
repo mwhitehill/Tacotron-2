@@ -48,7 +48,9 @@ class TacotronEncoderCell(RNNCell):
 class TacotronDecoderCellState(
 	collections.namedtuple("TacotronDecoderCellState",
 	 ("cell_state", "attention", "time", "alignments",
-	  "alignment_history", "max_attentions"))):
+	  "alignment_history", "max_attentions",
+		"attention_emt",
+		"alignment_history_emt","context_history_emt"))):
 	"""`namedtuple` storing the state of a `TacotronDecoderCell`.
 	Contains:
 	  - `cell_state`: The state of the wrapped `RNNCell` at the previous time
@@ -84,7 +86,9 @@ class TacotronDecoderCell(RNNCell):
 	tensorflow's attention wrapper call if it was using cumulative alignments instead of previous alignments only.
 	"""
 
-	def __init__(self, prenet, attention_mechanism, rnn_cell, frame_projection, stop_projection):
+	def __init__(self, prenet, attention_mechanism, rnn_cell, frame_projection, stop_projection,
+							 attention_mechanism_emt=None, attention_mechanism_emt_type=None, refnet_outputs_spk=None,
+							 labels=None):
 		"""Initialize decoder parameters
 
 		Args:
@@ -104,8 +108,22 @@ class TacotronDecoderCell(RNNCell):
 		self._cell = rnn_cell
 		self._frame_projection = frame_projection
 		self._stop_projection = stop_projection
+		self._attention_mechanism_emt = attention_mechanism_emt
 
 		self._attention_layer_size = self._attention_mechanism.values.get_shape()[-1].value
+
+		self._attention_mechanism_emt_type = attention_mechanism_emt_type
+		if attention_mechanism_emt_type == 'simple':
+			self._attention_layer_size_emt = self._attention_mechanism_emt.units
+		elif attention_mechanism_emt_type == 'multihead':
+			self._attention_layer_size_emt = 128
+		elif attention_mechanism_emt_type == 'style_tokens':
+			self._attention_layer_size_emt = 64
+		else:
+			self._attention_layer_size_emt = 0
+
+		self.refnet_outputs_spk = refnet_outputs_spk
+		self.labels = labels
 
 	def _batch_size_checks(self, batch_size, error_message):
 		return [check_ops.assert_equal(batch_size,
@@ -123,13 +141,19 @@ class TacotronDecoderCell(RNNCell):
 		Returns:
 		  An `TacotronDecoderCell` tuple containing shapes used by this object.
 		"""
+
+		attent_emt_size = self._attention_mechanism.alignments_size_emt if self._attention_mechanism_emt is not None else 0
 		return TacotronDecoderCellState(
 			cell_state=self._cell._cell.state_size,
 			time=tensor_shape.TensorShape([]),
 			attention=self._attention_layer_size,
 			alignments=self._attention_mechanism.alignments_size,
 			alignment_history=(),
-			max_attentions=())
+			max_attentions=(),
+			attention_emt=attent_emt_size,
+			alignment_history_emt=(),
+			context_history_emt = attent_emt_size
+		)
 
 	def zero_state(self, batch_size, dtype):
 		"""Return an initial (zero) state tuple for this `AttentionWrapper`.
@@ -153,29 +177,41 @@ class TacotronDecoderCell(RNNCell):
 				"(encoder output) and the requested batch size.")
 			with ops.control_dependencies(
 				self._batch_size_checks(batch_size, error_message)):
-				cell_state = nest.map_structure(
-					lambda s: array_ops.identity(s, name="checked_cell_state"),
-					cell_state)
+				cell_state = nest.map_structure(lambda s: array_ops.identity(s, name="checked_cell_state"), cell_state)
+
+			attention_emt =_zero_state_tensors(self._attention_layer_size_emt, batch_size, dtype) if self._attention_mechanism_emt is not None else tf.constant(0.)
+			alignment_history_emt = tensor_array_ops.TensorArray(dtype=dtype, size=0, dynamic_size=True) if self._attention_mechanism_emt_type == 'simple' else tf.constant(0.)
+			context_history_emt = tensor_array_ops.TensorArray(dtype=dtype, size=0, dynamic_size=True) if self._attention_mechanism_emt is not None else tf.constant(0.)
 			return TacotronDecoderCellState(
 				cell_state=cell_state,
 				time=array_ops.zeros([], dtype=tf.int32),
-				attention=_zero_state_tensors(self._attention_layer_size, batch_size,
-				  dtype),
+				attention=_zero_state_tensors(self._attention_layer_size, batch_size, dtype),
 				alignments=self._attention_mechanism.initial_alignments(batch_size, dtype),
-				alignment_history=tensor_array_ops.TensorArray(dtype=dtype, size=0,
-				dynamic_size=True),
-				max_attentions=tf.zeros((batch_size, ), dtype=tf.int32))
+				alignment_history=tensor_array_ops.TensorArray(dtype=dtype, size=0, dynamic_size=True),
+				max_attentions=tf.zeros((batch_size, ), dtype=tf.int32),
+				attention_emt=attention_emt,
+				alignment_history_emt=alignment_history_emt,
+				context_history_emt=context_history_emt,
+			)
 
-	def __call__(self, inputs, state, spk_emb=None, emt_label=None):
+	def __call__(self, inputs, state, spk_emb=None):
 		#Information bottleneck (essential for learning attention)
 		prenet_output = self._prenet(inputs)
 
 		#Concat context vector and prenet output to form LSTM cells input (input feeding)
 		LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
+		if self._attention_mechanism_emt is not None:
+			if self.refnet_outputs_spk is not None:
+				if self._attention_mechanism_emt_type == 'multihead':
+					ref_spk = self.refnet_outputs_spk + state.attention_emt
+					LSTM_input = tf.concat([LSTM_input, ref_spk], axis=-1)
+				else:
+					LSTM_input = tf.concat([LSTM_input, state.attention_emt, self.refnet_outputs_spk], axis=-1)
+			else:
+				LSTM_input = tf.concat([LSTM_input, state.attention_emt], axis=-1)
 
 		#Unidirectional LSTM layers
 		LSTM_output, next_cell_state = self._cell(LSTM_input, state.cell_state)
-
 
 		#Compute the attention (context) vector and alignments using
 		#the new decoder cell hidden state as query vector
@@ -185,11 +221,23 @@ class TacotronDecoderCell(RNNCell):
 		#https://arxiv.org/pdf/1508.04025.pdf
 		previous_alignments = state.alignments
 		previous_alignment_history = state.alignment_history
-		context_vector, alignments, cumulated_alignments, max_attentions = _compute_attention(self._attention_mechanism,
-			LSTM_output,
-			previous_alignments,
-			attention_layer=None,
-			prev_max_attentions=state.max_attentions)
+		context_vector, alignments,\
+			cumulated_alignments, max_attentions = _compute_attention(self._attention_mechanism, LSTM_output, previous_alignments,
+																																attention_layer=None, prev_max_attentions=state.max_attentions)
+
+		context_vector_emt = tf.constant(0.)
+		if self._attention_mechanism_emt_type == 'simple':
+			context_vector_emt, alignments_emt = self._attention_mechanism_emt(LSTM_output)
+		elif self._attention_mechanism_emt_type == 'multihead':
+			context_vector_emt = self._attention_mechanism_emt.multi_head_attention(tf.expand_dims(LSTM_output, axis=1))  # [N, 1, 128]
+			with tf.variable_scope('attn_emt'):
+				context_vector_emt = tf.layers.dense(tf.squeeze(context_vector_emt,axis=1),128)
+		elif self._attention_mechanism_emt_type == 'style_tokens':
+			attn_input = tf.concat([LSTM_output, self.labels], axis=-1)
+			context_vector_emt = self._attention_mechanism_emt.multi_head_attention(tf.expand_dims(attn_input, axis=1))  # [N, 1, 128]
+			context_vector_emt = tf.squeeze(context_vector_emt, axis=1)
+			# with tf.variable_scope('attn_emt'):
+			# 	context_vector_emt = tf.layers.dense(tf.squeeze(context_vector_emt, axis=1),128, activation=tf.nn.relu)
 
 		#Concat LSTM outputs and context vector to form projections inputs
 		projections_input = tf.concat([LSTM_output, context_vector], axis=-1)
@@ -200,6 +248,8 @@ class TacotronDecoderCell(RNNCell):
 
 		#Save alignment history
 		alignment_history = previous_alignment_history.write(state.time, alignments)
+		alignment_history_emt = state.alignment_history_emt.write(state.time, alignments_emt) if self._attention_mechanism_emt_type == 'simple' else tf.constant(0.)
+		context_history_emt = state.context_history_emt.write(state.time, context_vector_emt) if self._attention_mechanism_emt is not None else tf.constant(0.)
 
 		#Prepare next decoder state
 		next_state = TacotronDecoderCellState(
@@ -208,6 +258,10 @@ class TacotronDecoderCell(RNNCell):
 			attention=context_vector,
 			alignments=cumulated_alignments,
 			alignment_history=alignment_history,
-			max_attentions=max_attentions)
+			max_attentions=max_attentions,
+			attention_emt=context_vector_emt,
+			alignment_history_emt=alignment_history_emt,
+			context_history_emt = context_history_emt
+		)
 
 		return (cell_outputs, stop_tokens), next_state

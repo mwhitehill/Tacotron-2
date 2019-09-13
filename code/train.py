@@ -127,11 +127,31 @@ def main():
 	parser.add_argument('--max_to_keep', type=int, default=50, help='how many checkpoints to save')
 	parser.add_argument('--recon_emb_loss', action='store_true', default=False, help='Adds loss for reconstructing embeddings')
 	parser.add_argument('--intercross_both', action='store_true', default=False, help='does intercross for emotion and spk for both datasets')
+	parser.add_argument('--intercross_spk_only', action='store_true', default=False,help='does intercross for emotion and spk for both datasets')
 	parser.add_argument('--unpaired_loss_derate', type=float, default=1, help='how much to derate the unpaired mel out emb disc loss')
+	parser.add_argument('--unpaired_emt_loss_derate', type=float, default=1,help='how much to derate the unpaired mel out emb disc loss')
 	parser.add_argument('--lock_ref_enc', action='store_true', default=False, help='does not allow retraining of reference encoders')
 	parser.add_argument('--lock_gst', action='store_true', default=False, help='does not allow retraining of global style tokens')
 	parser.add_argument('--nat_gan', action='store_true', default=False, help='whether to use the naturalness gan')
+	parser.add_argument('--restart_nat_gan_d', action='store_true', default=False, help='whether to use the naturalness gan')
+	parser.add_argument('--nat_gan_derate', type=float, default=.1, help='how much to derate the unpaired mel out emb disc loss')
+	parser.add_argument('--restore_nat_gan_d_sep', action='store_true', default=False,help='whether to use the naturalness gan')
 	parser.add_argument('--save_output_vars', action='store_true', default=False, help='saves csvs of output vars')
+	parser.add_argument('--opt_ref_no_mo', action='store_true', default=False, help='dont train encoders based on synthesized samples style embeddings')
+	parser.add_argument('--restart_optimizer_r', action='store_true', default=False, help='retrains the reference encoder optimizer')
+	parser.add_argument('--pretrained_emt_disc', action='store_true', default=False, help='whether to use pretrained emt disc')
+	parser.add_argument('--no_general', action='store_true', default=False, help='mel output loss is not being classified as general')
+	parser.add_argument('--restore_std', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
+	parser.add_argument('--emt_attn', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
+	parser.add_argument('--emt_ref_gru', default='none', help='whether to use the a gru at the end of the reference embedding cnn')
+	parser.add_argument('--emt_only', action='store_true', default=False,help='does only one condition - emotion')
+	parser.add_argument('--attn', default=None, help='what type of attention to use')
+	parser.add_argument('--up_ref_match_p', action='store_true', default=False, help='feeds in the same references as paired for unpaired')
+	parser.add_argument('--tfr_up_only', action='store_true', default=False,help='feeds in the same references as paired for unpaired')
+	parser.add_argument('--no_mo_style_loss', action='store_true', default=False,help='feeds in the same references as paired for unpaired')
+	parser.add_argument('--l2_spk_emb', action='store_true', default=False,help='feeds in the same references as paired for unpaired')
+	parser.add_argument('--flip_spk_emt', action='store_true', default=False,help='pass in emt as spk ref and vice versa - used for testing reversing the attention')
+	parser.add_argument('--adain', action='store_true', default=False,help='use adaptive image normalization on references')
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']
@@ -148,6 +168,16 @@ def main():
 
 	if hparams.tacotron_fine_tuning and not(args.restore):
 		raise ValueError('fine_tuning set to true but not restoring the model!')
+
+	#need to use the intercross both method with the zo/jessa datasets
+	if args.tacotron_input.endswith('jessa.txt'):
+		assert(args.intercross_both)
+
+	if args.emt_attn and args.attn==None:
+		raise ValueError("can't have emotion attention and no attention type")
+
+	if args.flip_spk_emt:
+		assert(not (args.unpaired))
 
 	if args.model == 'Tacotron':
 		tacotron_train(args, log_dir, hparams)

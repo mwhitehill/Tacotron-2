@@ -1,6 +1,69 @@
+# from __future__ import absolute_import
+# from __future__ import division
+# from __future__ import print_function
+
 import tensorflow as tf
+from tensorflow.python.framework import ops
+
 
 class ReferenceEncoder:
+	def __init__(self, filters, kernel_size, strides, is_training, scope, depth, all_outputs=False, emt_ref_gru=None):
+		self.filters = filters
+		self.kernel_size = kernel_size
+		self.strides = strides
+		self.is_training = is_training
+		self.scope = scope
+		self.depth = depth
+		self.all_outputs = all_outputs
+		self.emt_ref_gru = emt_ref_gru
+
+	def __call__(self, inputs):
+
+		with tf.variable_scope(self.scope):
+			ref_outputs = tf.expand_dims(inputs,axis=-1)
+			# CNN stack
+			for i, channel in enumerate(self.filters):
+				strides = self.strides[i] if isinstance(self.strides,list) else self.strides
+				ref_outputs = conv2d(ref_outputs, channel, self.kernel_size, strides, tf.nn.relu, self.is_training, 'conv2d_%d' % i)
+
+			shapes = shape_list(ref_outputs)
+
+			ref_outputs = tf.reshape(
+				ref_outputs,
+				shapes[:-2] + [shapes[2] * shapes[3]])
+
+			if self.all_outputs:
+				assert(self.emt_ref_gru in ['gru','gru_multi','none'])
+				if self.emt_ref_gru == 'gru':
+					with tf.variable_scope('fw_RNN'.format(self.scope)):
+						fw_cell = tf.nn.rnn_cell.GRUCell(self.depth)
+					with tf.variable_scope('bw_RNN'.format(self.scope)):
+						bw_cell = tf.nn.rnn_cell.GRUCell(self.depth)
+					ref_outputs, (fw_state, bw_state) = tf.nn.bidirectional_dynamic_rnn(fw_cell,bw_cell, ref_outputs, dtype=tf.float32)
+					ref_outputs = tf.concat([ref_outputs[0],ref_outputs[1]],axis=-1)
+				elif self.emt_ref_gru == 'gru_multi':
+					gru_outputs = None
+					for i in range(8):
+						with tf.variable_scope('gru_{}'.format(i)):
+							encoder_outputs, encoder_state = tf.nn.dynamic_rnn(tf.nn.rnn_cell.GRUCell(self.depth),ref_outputs,dtype=tf.float32)
+							reference_state = tf.layers.dense(encoder_outputs[:, -1, :], 128, activation=tf.nn.tanh)  # [N, 128]
+							reference_state = tf.expand_dims(reference_state,axis=1)
+						gru_outputs = tf.concat([gru_outputs,reference_state],axis=1) if gru_outputs is not None else reference_state
+					ref_outputs = gru_outputs
+
+				#else - just use CNN output
+				return(ref_outputs)
+			else:
+			# RNN
+				encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+					tf.nn.rnn_cell.GRUCell(self.depth),
+					ref_outputs,
+					dtype=tf.float32)
+
+				reference_state = tf.layers.dense(encoder_outputs[:,-1,:], 128, activation=tf.nn.tanh) # [N, 128]
+				return reference_state
+
+class ReferenceEncoderAdaIn:
 	def __init__(self, filters, kernel_size, strides, is_training, scope, depth):
 		self.filters = filters
 		self.kernel_size = kernel_size
@@ -9,26 +72,40 @@ class ReferenceEncoder:
 		self.scope = scope
 		self.depth = depth
 
-	def __call__(self, inputs):
+	def __call__(self, inputs_spk, inputs_emt):
 
 		with tf.variable_scope(self.scope):
-			ref_outputs = tf.expand_dims(inputs,axis=-1)
+			ref_outputs_spk = tf.expand_dims(inputs_spk, axis=-1)
+			ref_outputs_emt = tf.expand_dims(inputs_emt, axis=-1)
+
 			# CNN stack
 			for i, channel in enumerate(self.filters):
-				ref_outputs = conv2d(ref_outputs, channel, self.kernel_size, self.strides, tf.nn.relu, self.is_training, 'conv2d_%d' % i)
+				strides = self.strides[i] if isinstance(self.strides,list) else self.strides
+				ref_outputs_spk = conv2d(ref_outputs_spk, channel, self.kernel_size, strides, tf.nn.relu, self.is_training,
+																 'conv2d_%d' % i,batch_norm=False)
+				ref_outputs_emt = conv2d(ref_outputs_emt, channel, self.kernel_size, strides, tf.nn.relu, self.is_training,
+																 'conv2d_%d' % i, batch_norm=False)
 
-			shapes = shape_list(ref_outputs)
-			ref_outputs = tf.reshape(
-				ref_outputs,
-				shapes[:-2] + [shapes[2] * shapes[3]])
+			ref_outputs_spk_pre_norm = ref_outputs_spk
+			mean_spk, var_spk = tf.nn.moments(ref_outputs_spk, axes=[1,2],keep_dims=True)
+			mean_emt, var_emt = tf.nn.moments(ref_outputs_emt, axes=[1,2],keep_dims=True)
+			# ref_outputs_spk = tf.nn.batch_normalization(ref_outputs_spk, mean=mean_spk, variance=var_spk, offset=mean_emt, scale=var_emt,
+			# 													variance_epsilon=1e-9)
+			ref_outputs_spk_norm = tf.nn.batch_normalization(ref_outputs_spk, mean=mean_spk, variance=var_spk,
+																											 offset=mean_emt, scale=var_emt,
+																											 variance_epsilon=1e-9)
+
+			ref_outputs_spk = ref_outputs_spk * .9 + ref_outputs_spk_norm * .1
+
+			shapes = shape_list(ref_outputs_spk)
+			ref_outputs_spk = tf.reshape(ref_outputs_spk, shapes[:-2] + [shapes[2] * shapes[3]])
+
 			# RNN
-			encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
-				tf.nn.rnn_cell.GRUCell(self.depth),
-				ref_outputs,
-				dtype=tf.float32)
+			encoder_outputs, encoder_state = tf.nn.dynamic_rnn(tf.nn.rnn_cell.GRUCell(self.depth), ref_outputs_spk, dtype=tf.float32)
 
 			reference_state = tf.layers.dense(encoder_outputs[:,-1,:], 128, activation=tf.nn.tanh) # [N, 128]
-			return reference_state
+			return reference_state, ref_outputs_spk_pre_norm
+
 
 class HighwayNet:
 	def __init__(self, units, name=None):
@@ -419,7 +496,7 @@ def conv1d(inputs, kernel_size, channels, activation, is_training, drop_rate, bn
 		return tf.layers.dropout(activated, rate=drop_rate, training=is_training,
 								name='dropout_{}'.format(scope))
 
-def conv2d(inputs, filters, kernel_size, strides, activation, is_training, scope):
+def conv2d(inputs, filters, kernel_size, strides, activation, is_training, scope, batch_norm=True):
   with tf.variable_scope(scope):
     conv2d_output = tf.layers.conv2d(
       inputs,
@@ -427,7 +504,8 @@ def conv2d(inputs, filters, kernel_size, strides, activation, is_training, scope
       kernel_size=kernel_size,
       strides=strides,
       padding='same')
-    conv2d_output = tf.layers.batch_normalization(conv2d_output, training=is_training)
+    if batch_norm:
+      conv2d_output = tf.layers.batch_normalization(conv2d_output, training=is_training)
     if activation is not None:
       conv2d_output = activation(conv2d_output)
     return conv2d_output
@@ -564,3 +642,77 @@ class Style_Emb_Disc:
 		with tf.variable_scope(self.scope):
 				logit = tf.layers.dense(inputs, self.output_classes)
 		return logit
+
+class Style_Emb_Disc_GRU:
+	"""Simple classifier for style embeddings
+	"""
+	def __init__(self, output_classes, scope, depth=128):
+		"""
+		Args:
+			layers_sizes: list of integers, the length of the list represents the number of pre-net
+				layers and the list values represent the layers number of units
+			activation: callable, activation functions of the prenet layers.
+			scope: Prenet scope.
+		"""
+		super(Style_Emb_Disc_GRU, self).__init__()
+		self.output_classes = output_classes
+		self.scope = scope
+		self.depth = depth
+
+	def __call__(self, inputs):
+		with tf.variable_scope(self.scope):
+				encoder_outputs, encoder_state = tf.nn.dynamic_rnn(tf.nn.rnn_cell.GRUCell(self.depth),inputs,dtype=tf.float32)
+				logit = tf.layers.dense(encoder_outputs[:,-1,:], self.output_classes)
+		return logit
+
+class FlipGradientBuilder(object):
+	def __init__(self):
+		self.num_calls = 0
+
+	def __call__(self, x, l=1.0):
+		grad_name = "FlipGradient%d" % self.num_calls
+
+		@ops.RegisterGradient(grad_name)
+		def _flip_gradients(op, grad):
+			return [tf.negative(grad) * l]
+
+		g = tf.get_default_graph()
+		with g.gradient_override_map({"Identity": grad_name}):
+			y = tf.identity(x)
+
+		self.num_calls += 1
+		return y
+
+def focal_loss(y_true, y_pred):
+		"""Focal loss for multi-classification
+		FL(p_t)=-alpha(1-p_t)^{gamma}ln(p_t)
+		Notice: y_pred is probability after softmax
+		gradient is d(Fl)/d(p_t) not d(Fl)/d(x) as described in paper
+		d(Fl)/d(p_t) * [p_t(1-p_t)] = d(Fl)/d(x)
+		Focal Loss for Dense Object Detection
+		https://arxiv.org/abs/1708.02002
+
+		Arguments:
+				y_true {tensor} -- ground truth labels, shape of [batch_size, num_cls]
+				y_pred {tensor} -- model's output, shape of [batch_size, num_cls]
+
+		Keyword Arguments:
+				gamma {float} -- (default: {2.0})
+				alpha {float} -- (default: {4.0})
+
+		Returns:
+				[tensor] -- loss.
+		"""
+		gamma = 2.
+		alpha = 4.
+		epsilon = 1.e-9
+
+		# y_true = tf.convert_to_tensor(y_true, tf.float32)
+		# y_pred = tf.convert_to_tensor(y_pred, tf.float32)
+
+		model_out = tf.add(y_pred, epsilon)
+		ce = tf.multiply(y_true, -tf.log(model_out))
+		weight = tf.multiply(y_true, tf.pow(tf.subtract(1., model_out), gamma))
+		fl = tf.multiply(alpha, tf.multiply(weight, ce))
+		reduced_fl = tf.reduce_max(fl, axis=1)
+		return tf.reduce_mean(reduced_fl)

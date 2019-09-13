@@ -38,6 +38,39 @@ def create_metadata_emt4():
   df_metadata_path = os.path.join(folder_data, 'metadata_emt4.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
+def create_metadata_jessa():
+
+  folder_wav = '//vibe15/PublicAll/STCM-101/Jessa/wave16kNormalized'
+  folder_data_jessa = os.path.join(folder_data, 'jessa')
+  os.makedirs(folder_data_jessa,exist_ok=True)
+
+  paths = []
+  for i,(root, dirs, files) in enumerate(os.walk(folder_wav, topdown=True)):
+    for f in files:
+      paths.append(os.path.join(os.path.basename(os.path.dirname(root)), os.path.basename(root),f))
+
+  columns = ['path', 'script', 'emt_label', 'spk_id', 'sex']
+  df_metadata = pd.DataFrame([],columns=columns)
+
+  for i,p in enumerate(paths[:]):
+    fname = os.path.basename(p)
+    name = fname.split('.')[0]
+    text_file = os.path.basename(os.path.dirname(p)) + '.txt'
+    text_file_path  = os.path.join(os.path.dirname(folder_wav),'TextScripts_UTF8',text_file)
+    df = pd.read_csv(text_file_path,sep=r'\t',header=None,names=['filename', 'script'],dtype={'filename': 'object'},index_col=0)
+    df.index.values[0] = df.index.values[0][3:]
+    row = df.loc[name]
+    script = row.script
+    if script == None:
+      print("script not found", p)
+    df_metadata = df_metadata.append(pd.DataFrame([[p.replace('\\','/'),script,0,1,'F']],columns=columns),ignore_index=True)
+
+    if i % 200 == 0:
+      print("finished",i)
+
+  df_metadata_path = os.path.join(folder_data, 'metadata_jessa.txt')
+  df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
+
 def create_metadata_harriton():
 
   folder_raw = r'C:\Users\t-mawhit\Documents\data\Harriton\emotion'
@@ -72,7 +105,7 @@ def create_metadata_harriton():
     row = df_all_txt[df_all_txt.filename == name]
     script = row.script.values[0]
     emt_label = row.emotion_label.values[0]
-    df_metadata = df_metadata.append(pd.DataFrame([[p.replace('\\','/'),script,emt_label,-1,'M']],columns=columns),ignore_index=True)
+    df_metadata = df_metadata.append(pd.DataFrame([[p.replace('\\','/'),script,emt_label,1,'M']],columns=columns),ignore_index=True)
   df_metadata_path = os.path.join(folder_data, 'metadata_emth.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
@@ -196,10 +229,43 @@ def create_metadata_vctk():
   df_metadata_path = os.path.join(folder_data, 'metadata_vctk.txt')
   df_metadata.to_csv(df_metadata_path,sep='|',header=False,index=False)
 
+def vctk_metadata_accent():
+  folder = r'C:\Users\t-mawhit\Documents\data\VCTK-Corpus'
+  folder_wav = os.path.join(folder,'wav48')
+  folder_data_vctk = os.path.join(folder_data, 'vctk')
+  os.makedirs(folder_data_vctk,exist_ok=True)
+  old_train_path = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\vctk\train.txt'
+  new_train_path = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\vctk\train_accent.txt'
+
+  #manually created this csv file because the original was really dumb!
+  meta_speakers_path = os.path.join(folder, 'speaker-info.csv')
+  df_speakers = pd.read_csv(meta_speakers_path,index_col=0)
+  accents = df_speakers.ACCENTS.unique()
+
+  accents = sorted(list(frozenset(accents)))
+
+  new_meta = []
+  with open(old_train_path, encoding='utf-8') as f:
+    for i,line in enumerate(f):
+      parts = line.strip().split('|')
+      name=parts[10].split('_')[0][1:]
+      try:
+        parts[8] = accents.index(df_speakers.loc[int(name),'ACCENTS'])
+      except KeyError:
+        print("cound't find speaker:",name)
+        continue
+      new_meta.append(parts)
+
+  with open(new_train_path, 'w', encoding='utf-8') as f:
+    for m in new_meta:
+      f.write('|'.join([str(x) for x in m]) + '\n')
+
+
 if __name__ == '__main__':
   # create_metadata_vctk()
   # create_metadata_librispeech()
   # create_metadata_emt4()
   create_metadata_harriton()
-
+  # create_metadata_jessa()
+  # vctk_metadata_accent()
 

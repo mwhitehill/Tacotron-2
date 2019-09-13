@@ -6,6 +6,7 @@ from time import sleep
 import numpy as np
 import tensorflow as tf
 import pandas as pd
+from datetime import datetime
 
 if __name__ == '__main__':
 	import sys
@@ -18,6 +19,8 @@ from tacotron.synthesizer import Synthesizer
 from tqdm import tqdm
 from tacotron.feeder import get_metadata_df
 
+def time_string():
+	return datetime.now().strftime('%Y.%m.%d_%H-%M-%S')
 
 def generate_fast(model, text):
 	model.synthesize([text], None, None, None, None)
@@ -109,24 +112,113 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 
 	mel_ref_filenames_emt = []
 	mel_ref_filenames_spk = []
+	emt_labels = []
+	spk_labels = []
 	for m in metadata:
 		dataset = m[0]
 		if m[12] == 'same':
 			mel_ref_filenames_emt.append(os.path.join(args.input_dir, m[0], 'mels', m[2]))
 		else:
-			dataset_emt = 'emth' if dataset in ['emth'] else 'emt4'
+			if 'accent' in args.metadata_filename:
+				dataset_emt = 'vctk'
+			else:
+				dataset_emt = 'emth' if m[12][0] == 'h' else 'emt4'
+				if m[12][0] == 'h':
+					m[12] = m[12][1:]
 			mel_ref_filenames_emt.append(os.path.join(args.input_dir, dataset_emt , 'mels', m[12]))
 
 		if m[14] == 'same':
 			mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
 		else:
 			mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'vctk', 'mels', m[14]))
+		emt_labels.append(m[8])
+		spk_labels.append(m[9])
+	if args.flip_spk_emt:
+		mel_ref_filenames_emt_tmp = mel_ref_filenames_emt
+		mel_ref_filenames_emt = mel_ref_filenames_spk
+		mel_ref_filenames_spk = mel_ref_filenames_emt_tmp
 
 	mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
 																											 basenames_refs=basenames_refs,
 																											 mel_ref_filenames_emt=mel_ref_filenames_emt,
-																											 mel_ref_filenames_spk=mel_ref_filenames_spk)
+																											 mel_ref_filenames_spk=mel_ref_filenames_spk,
+																											 emt_labels_synth=emt_labels, spk_labels_synth=spk_labels)
+
 	return None
+
+def run_synthesis_multiple(args, checkpoint_path, output_dir, hparams, model_suffix):
+
+	n_spk_per_accent = 2
+	n_text_per_spk = 5
+
+	synth_dir = os.path.join(output_dir, 'wavs', model_suffix, time_string())
+	os.makedirs(synth_dir, exist_ok=True)
+
+	synth = Synthesizer()
+	synth.load(args, checkpoint_path, hparams)
+
+	with open(args.train_filename, encoding='utf-8') as f:
+		metadata = [line.strip().split('|') for line in f]
+		if args.remove_long_samps:
+			len_before = len(metadata)
+			metadata = [f for f in metadata if not (f[10].endswith('_023.wav'))]
+			metadata = [f for f in metadata if not (f[10].endswith('_021.wav'))]
+			metadata = [f for f in metadata if int(f[6]) < 500]
+			print("Removed Long Samples - before: {}, after: {}".format(len_before,len(metadata)))
+
+		#only synthesize long samples
+		metadata = [f for f in metadata if int(f[6]) >200]
+
+		frame_shift_ms = hparams.hop_size / hparams.sample_rate
+		hours = sum([int(x[6]) for x in metadata]) * frame_shift_ms / (3600)
+		print('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
+
+	df = pd.DataFrame(metadata,	columns = ['dataset','audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
+						 'emt_label', 'spk_label', 'basename', 'sex'])
+	chosen_accents = ['0','3']
+	assert (len(chosen_accents) <= 2)
+	acc_names = ['American','Australian','Canadian','English','Indian','Irish','NewZealand','NorthernIrish',
+							 'Scottish','SouthAfrican','Welsh']
+	df_acc = df[df['emt_label'].isin(chosen_accents)]
+	# spk_idxs = sorted(frozenset(df_acc['spk_label'].unique()))
+	texts = []
+	mel_filenames = []
+	mel_ref_filenames_emt =[]
+	mel_ref_filenames_spk = []
+	basenames = []
+	basenames_refs = []
+
+	for i,acc in enumerate(chosen_accents):
+		df_acc_spks = df_acc[df_acc['emt_label']==acc]['spk_label'].unique()
+		chosen_spks = np.random.choice(df_acc_spks,n_spk_per_accent,replace=False)
+
+		for spk in chosen_spks:
+			df_spk = df_acc[df_acc['spk_label']==spk]
+			idxs = np.random.choice(df_spk.index, n_text_per_spk, replace=False)
+			for idx in idxs:
+				# for j in range(5):
+				for acc_ref in chosen_accents:
+					texts.append(df_acc.loc[idx].text)
+					mel_filename = os.path.join(args.input_dir, df_acc.loc[idx].dataset, 'mels', df_acc.loc[idx].mel_filename)
+					mel_filenames.append(mel_filename)
+					mel_ref_filenames_spk.append(mel_filename)
+					basenames.append('{}_{}_{}'.format(df_acc.loc[idx].basename.split('.')[0],
+																						 acc_names[int(acc)][:2],df_acc.loc[idx].sex))
+
+					df_other_acc = df_acc[df_acc['emt_label']==acc_ref]
+					row = df_other_acc.loc[np.random.choice(df_other_acc.index, 1)]
+					mel_ref_filenames_emt.append(os.path.join(args.input_dir, row.dataset.iloc[0], 'mels',
+																										row.mel_filename.iloc[0]))
+					basenames_refs.append('{}'.format(acc_names[int(row.emt_label)][:2]))#,j))
+
+	if args.flip_spk_emt:
+		mel_ref_filenames_emt_tmp = mel_ref_filenames_emt
+		mel_ref_filenames_emt = mel_ref_filenames_spk
+		mel_ref_filenames_spk = mel_ref_filenames_emt_tmp
+
+	print('Starting Synthesis on {} samples'.format(len(mel_filenames)//len(chosen_accents)))
+	synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames, basenames_refs=basenames_refs,
+									 mel_ref_filenames_emt=mel_ref_filenames_emt,mel_ref_filenames_spk=mel_ref_filenames_spk)
 
 def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
 
@@ -145,18 +237,39 @@ def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
 	spk_ids_chosen = np.sort(np.random.choice(spk_ids,args.n_spk))
 
 	#make sure first user is in embeddings (zo - the one with emotions)
-	if not(0 in spk_ids_chosen):
-		spk_ids_chosen = np.sort(np.append(spk_ids_chosen,0))
+	# if not(0 in spk_ids_chosen):
+	# 	spk_ids_chosen = np.sort(np.append(spk_ids_chosen,0))
+
+
+	# if args.unpaired:
+	# 	chosen_idx = []
+	# 	for id in spk_ids_chosen:
+	# 		spk_rows = df_meta[df_meta.loc[:, 'spk_label'] == id]
+	# 		chosen_idxs  = np.random.choice(spk_rows.index.values, args.n_per_spk)
+	# 		for idx in chosen_idxs:
+	# 			row = df_meta
+	# 			for i in range(4):
+	# 				if i ==0:
+	#
+	#
+	# 	df_meta_chosen = df_meta.iloc[np.array(sorted(chosen_idx))]
+	#
+	# 	mel_filenames = [os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename) for idx, row in
+	# 									 df_meta_chosen.iterrows()]
+	#
+	#
+	# 	texts = list(df_meta_chosen.text)
+
 
 	chosen_idx = []
 	for id in spk_ids_chosen:
 		spk_rows = df_meta[df_meta.loc[:, 'spk_label'] == id]
-		if id ==0:
-			for emt in range(4):
-				emt_rows = spk_rows[spk_rows.loc[:, 'emt_label'] == emt]
-				chosen_idx += list(np.random.choice(emt_rows.index.values, args.n_emt))
-		else:
-			chosen_idx += list(np.random.choice(spk_rows.index.values,args.n_per_spk))
+		# if id ==0:
+		# 	for emt in range(4):
+		# 		emt_rows = spk_rows[spk_rows.loc[:, 'emt_label'] == emt]
+		# 		chosen_idx += list(np.random.choice(emt_rows.index.values, args.n_emt))
+		# else:
+		chosen_idx += list(np.random.choice(spk_rows.index.values,args.n_per_spk))
 
 	df_meta_chosen = df_meta.iloc[np.array(sorted(chosen_idx))]
 
@@ -166,23 +279,35 @@ def get_style_embeddings(args, checkpoint_path, output_dir, hparams):
 	synth = Synthesizer()
 	synth.load(args, checkpoint_path, hparams)
 	print("getting embedding for {} samples".format(len(mel_filenames)))
-
-	emb_emt, emb_spk = synth.synthesize(texts, None, None, None, mel_filenames,
+	emb_emt, emb_spk, emb_mo_emt, emb_mo_spk, emb_cont_emt = synth.synthesize(texts, None, None, None, mel_filenames,
 																											 mel_ref_filenames_emt=mel_filenames,
 																											 mel_ref_filenames_spk=mel_filenames,
 																											 emb_only=True)
 
 	#SAVE META + EMBEDDING CSVS
 	columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
-	df_meta_chosen.loc[:,columns_to_keep].to_csv(meta_path, sep='\t', index=False)
+	df = df_meta_chosen.loc[:,columns_to_keep]
+	df['real'] = 'real'
+	df_synth = df.copy()
+	df_synth['real'] = 'synth'
+	df = pd.concat([df,df_synth])
+	df.to_csv(meta_path, sep='\t', index=False)
 
-	pd.DataFrame(emb_emt).to_csv(emb_emt_path,sep='\t',index=False, header=False)
+	# if args.emt_attn:
+
+	# emb_emt = np.vstack((emb_emt, emb_mo_emt))
+	emb_spk = np.vstack((emb_spk, emb_mo_spk))
+
+
+	# pd.DataFrame(emb_emt).to_csv(emb_emt_path,sep='\t',index=False, header=False)
 	pd.DataFrame(emb_spk).to_csv(emb_spk_path, sep='\t', index=False, header=False)
 
-def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
+	print(len(emb_emt))
+	print(emb_emt.shape)
+
+def tacotron_synthesize(args, hparams, checkpoint, sentences=None, model_suffix=None):
 	# output_dir = 'tacotron_' + args.output_dir
 	output_dir = args.output_dir
-
 	try:
 		checkpoint_path = tf.train.get_checkpoint_state(checkpoint).model_checkpoint_path
 		log('loaded model at {}'.format(checkpoint_path))
@@ -202,6 +327,8 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 	elif args.mode == 'synthesis':
 		# return run_synthesis(args, checkpoint_path, output_dir, hparams)
 		return run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams)
+	elif args.mode == 'synthesis_multiple':
+		run_synthesis_multiple(args, checkpoint_path, output_dir, hparams, model_suffix)
 	elif args.mode == 'style_embs':
 		get_style_embeddings(args, checkpoint_path, output_dir, hparams)
 	else:
@@ -221,16 +348,23 @@ def test():
 	parser.add_argument('--remove_long_samps', action='store_true', default=False, help='removes long samples')
 	args = parser.parse_args()
 
-
 	#set manually
-	datasets = 'emt4_vctk'
-	suffix = '_e40_v15'
-	suffix_logs = '_e40_v15'
-	model_suffix = '2conds_{}{}'.format(datasets,suffix_logs)
-	args.mode = 'synthesis' #'style_embs' #'synthesis'
+	datasets = 'emt4_jessa' #'vc
+	# tk_accent' 'emt4_jessa'
+	# suffix = 'emt4'
+	model_suffix = 'emt4_style_tokens' #'vctk_accent_simp_gru_multi'#vctk_accent_baseline' #mh_emt_disc_l2'
+	args.mode =  'synthesis' #'synthesis_multiple' #'style_embs' #'synthesis'
+	args.emt_attn=False#True
+	args.emt_ref_gru= 'none' #none' 'gru' 'gru_multi'
+	args.attn = 'sytle_tokens' #'simple' 'multihead'
+	args.emt_only = True#True
+	args.remove_long_samps = True#True
+	args.adain = False#True
+	args.flip_spk_emt = False#False
 
 	#MODEL SETTINGS
 	concat = True
+	args.tfr_up_only = False
 
 	#EMBEDDING SETTINGS
 	args.n_spk = 5
@@ -242,14 +376,23 @@ def test():
 
 	args.intercross = True
 	args.GTA=False
+	args.nat_gan=False
+	args.unpaired=False
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
-	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test.txt')
-	args.train_filename = os.path.join(one_up_dir, 'data/train_{}{}.txt'.format(datasets,suffix))
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test_vctk_accent.txt')#emt_attn.txt')
+	# args.train_filename = os.path.join(one_up_dir, 'data/train_{}{}.txt'.format(datasets,suffix))
+	args.train_filename = os.path.join(one_up_dir, 'data/train_{}.txt'.format(datasets))
 	hparams.tacotron_gst_concat = concat
-	args.checkpoint = os.path.join(one_up_dir,'logs/logs-Tacotron-2_{}/taco_pretrained'.format(model_suffix))
+	args.checkpoint = os.path.join(one_up_dir,'logs/logs-{}/taco_pretrained'.format(model_suffix))
 
-	tacotron_synthesize(args, hparams, args.checkpoint)
+	import socket
+	if socket.gethostname() == 'A3907623':
+		hparams.tacotron_num_gpus = 1
+		hparams.tacotron_batch_size = 32
+
+
+	tacotron_synthesize(args, hparams, args.checkpoint, model_suffix=model_suffix)
 
 
 if __name__ == '__main__':

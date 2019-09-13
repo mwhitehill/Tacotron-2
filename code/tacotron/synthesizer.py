@@ -17,7 +17,11 @@ from tacotron.utils.text import text_to_sequence
 
 
 class Synthesizer:
-	def load(self,args, checkpoint_path, hparams, gta=False, use_intercross=False, model_name='Tacotron'):
+	def load(self, args,checkpoint_path, hparams, gta=False, use_intercross=False, n_emt=4, n_spk=2):
+
+		self.args = args
+
+		model_name = 'Tacotron_emt_attn' if args.emt_attn else 'Tacotron'
 		log('Constructing model: %s' % model_name)
 		#Force the batch size to be known in order to use attention masking in batch synthesis
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
@@ -28,14 +32,19 @@ class Synthesizer:
 		mel_refs_emt = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs_emt')
 		mel_refs_spk = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_refs_spk')
 
+		emt_labels_synth = tf.placeholder(tf.int32, (None,), name='emt_labels_synth')
+		spk_labels_synth = tf.placeholder(tf.int32, (None,), name='spk_labels_synth')
+
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
 				self.model.initialize(args, inputs, input_lengths, targets, gta=gta, split_infos=split_infos, use_intercross=use_intercross,
-															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk)
+															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk, synth=True,
+															emt_labels=emt_labels_synth, spk_labels=spk_labels_synth)
 			else:
 				self.model.initialize(args, inputs, input_lengths, split_infos=split_infos, use_intercross=use_intercross,
-															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk, n_emt=4, n_spk=252)
+															ref_mel_emt=mel_refs_emt, ref_mel_spk=mel_refs_spk, n_emt=4, n_spk=2, synth=True,
+															emt_labels=emt_labels_synth, spk_labels=spk_labels_synth)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -69,6 +78,9 @@ class Synthesizer:
 		self.mel_refs_emt = mel_refs_emt
 		self.mel_refs_spk = mel_refs_spk
 
+		self.emt_labels = emt_labels_synth
+		self.spk_labels = spk_labels_synth
+
 		log('Loading checkpoint: %s' % checkpoint_path)
 		#Memory allocation on the GPUs as needed
 		config = tf.ConfigProto()
@@ -83,7 +95,9 @@ class Synthesizer:
 
 
 	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, basenames_refs=None,
-								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None, emb_only=False):
+								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None, emb_only=False,
+								 emt_labels_synth=None, spk_labels_synth=None):
+
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -100,6 +114,10 @@ class Synthesizer:
 				mel_ref_filenames_emt.append(mel_ref_filenames_emt[-1])
 			if mel_ref_filenames_spk is not None:
 				mel_ref_filenames_spk.append(mel_ref_filenames_spk[-1])
+			if emt_labels_synth is not None:
+				emt_labels_synth.append(emt_labels_synth[-1])
+			if spk_labels_synth is not None:
+				spk_labels_synth.append(spk_labels_synth[-1])
 
 		assert 0 == len(texts) % self._hparams.tacotron_num_gpus
 		seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
@@ -111,11 +129,7 @@ class Synthesizer:
 		split_infos = []
 
 		np_mel_refs_emt = [np.load(f) for f in mel_ref_filenames_emt]
-		#if just getting embedding, will use the same emt ref and spk ref
-		if emb_only:
-			np_mel_refs_spk = np_mel_refs_emt
-		else:
-			np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
+		np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
 
 		mel_ref_seqs_emt = None
 		mel_ref_seqs_spk = None
@@ -141,6 +155,8 @@ class Synthesizer:
 			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
 			self.mel_refs_emt: mel_ref_seqs_emt,
 			self.mel_refs_spk: mel_ref_seqs_spk,
+			self.spk_labels: np.asarray(spk_labels_synth, dtype=np.int32),
+			self.emt_labels: np.asarray(emt_labels_synth, dtype=np.int32)
 		}
 
 		if self.gta:
@@ -161,19 +177,42 @@ class Synthesizer:
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
 		if emb_only:
-
-			return(self.session.run([self.model.tower_refnet_out_emt[0],
-															 self.model.tower_refnet_out_spk[0]],
-																					feed_dict=feed_dict))
+			if self.args.emt_attn:
+				return(self.session.run([self.model.tower_refnet_out_emt[0],
+															 self.model.tower_refnet_out_spk[0],
+															 self.model.tower_refnet_outputs_mel_out_emt[0],
+															 self.model.tower_refnet_outputs_mel_out_spk[0],
+															 self.model.tower_context_emt[0]],feed_dict=feed_dict))
+			else:
+				return (self.session.run([self.model.tower_refnet_out_emt[0],
+																	self.model.tower_refnet_out_spk[0],
+																	self.model.tower_refnet_outputs_mel_out_emt[0],
+																	self.model.tower_refnet_outputs_mel_out_spk[0],
+																	tf.constant(1.)], feed_dict=feed_dict))
 
 		if self.gta or not hparams.predict_linear:
-			mels, alignments, stop_tokens, refnet_emt, refnet_spk, ref_emt, ref_spk = self.session.run([self.mel_outputs,
-																												self.alignments,
-																												self.stop_token_prediction,
-																												self.model.tower_refnet_out_emt[0],
-																												self.model.tower_refnet_out_spk[0],
-																												self.model.tower_ref_mel_emt[0],
-																												self.model.tower_ref_mel_spk[0]], feed_dict=feed_dict)
+			if self.args.attn == 'style_tokens':
+				mels, alignments, stop_tokens = self.session.run([self.mel_outputs,
+																										self.alignments,
+																										self.stop_token_prediction],
+																									 feed_dict=feed_dict)
+			else:
+				mels, alignments, stop_tokens, refnet_emt,\
+				ref_emt, alignments_emt = self.session.run([self.mel_outputs,
+																													self.alignments,
+																													self.stop_token_prediction,
+																													self.model.tower_refnet_out_emt[0],
+																													self.model.tower_ref_mel_emt[0],
+																													self.model.tower_alignments_emt],
+																													#self.model.tower_context_emt[0],
+																													#self.model.tower_refnet_out_spk[0]],
+																										feed_dict=feed_dict)
+
+			# import pandas as pd
+			# df_cont = pd.DataFrame(cont[0])
+			# df_cont.to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test\cont.csv')
+			# pd.DataFrame(refnet_spk).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test\r_spk.csv')
+			# raise
 
 			# print(refnet_emt[:,0:5])
 			# print(refnet_spk[:,0:5])
@@ -188,6 +227,8 @@ class Synthesizer:
 			mels = [mel for gpu_mels in mels for mel in gpu_mels]
 			alignments = [align for gpu_aligns in alignments for align in gpu_aligns]
 			stop_tokens = [token for gpu_token in stop_tokens for token in gpu_token]
+			if self.args.emt_attn and not(self.args.attn == 'style_tokens'):
+				alignments_emt = [align_emt for gpu_aligns_emt in alignments_emt for align_emt in gpu_aligns_emt]
 
 			if not self.gta:
 				#Natural batch synthesis
@@ -199,8 +240,9 @@ class Synthesizer:
 			assert len(mels) == len(texts)
 
 		else:
-			linears, mels, alignments, stop_tokens = self.session.run([self.linear_outputs, self.mel_outputs, self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
-			
+			linears, mels, alignments, stop_tokens = self.session.run([self.linear_outputs, self.mel_outputs,
+																																 self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
+
 			#Linearize outputs (1D arrays)
 			linears = [linear for gpu_linear in linears for linear in gpu_linear]
 			mels = [mel for gpu_mels in mels for mel in gpu_mels]
@@ -257,9 +299,8 @@ class Synthesizer:
 			# Write the spectrogram to disk
 			# Note: outputs mel-spectrogram files and target ones have same names, just different folders
 			mel_filename = os.path.join(out_dir, 'mel-{}_{}.npy'.format(basenames[i],basenames_refs[i]))
-			np.save(mel_filename, mel, allow_pickle=False)
+			# np.save(mel_filename, mel, allow_pickle=False)
 			saved_mels_paths.append(mel_filename)
-
 			if log_dir is not None:
 				os.makedirs(os.path.join(log_dir,'wavs'),exist_ok=True)
 				os.makedirs(os.path.join(log_dir, 'plots'),exist_ok=True)
@@ -272,15 +313,20 @@ class Synthesizer:
 
 				#add silence to make ending of file more noticeable
 				wav = np.append(np.append(np.zeros(int(.5*hparams.sample_rate)), wav),np.zeros(int(.5*hparams.sample_rate)))
-				audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}-mel_{}.wav'.format(basenames[i],basenames_refs[i])), sr=hparams.sample_rate)
+				audio.save_wav(wav, os.path.join(log_dir, 'wavs/wav-{}_{}.wav'.format(basenames[i],basenames_refs[i])), sr=hparams.sample_rate)
 
 				#save alignments
 				plot.plot_alignment(alignments[i], os.path.join(log_dir, 'plots/alignment-{}_{}.png'.format(basenames[i],basenames_refs[i])),
 					title='{}'.format(texts[i]), split_title=True, max_len=target_lengths[i])
 
+				if self.args.emt_attn and self.args.attn == 'simple':
+					plot.plot_alignment(alignments_emt[i], os.path.join(log_dir, 'plots/alignment_emt-{}_{}.png'.format(basenames[i],basenames_refs[i])),
+						title='{}'.format(texts[i]), split_title=True, max_len=target_lengths[i])
+
 				#save mel spectrogram plot
 				plot.plot_spectrogram(mel, os.path.join(log_dir, 'plots/mel-{}_{}.png'.format(basenames[i],basenames_refs[i])),
 					title='{}'.format(texts[i]), split_title=True)
+				print("Finished saving {}_{}".format(basenames[i],basenames_refs[i]))
 
 				if hparams.predict_linear:
 					#save wav (linear -> wav)

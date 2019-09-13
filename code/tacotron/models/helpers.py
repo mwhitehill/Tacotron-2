@@ -60,7 +60,7 @@ class TacoTestHelper(Helper):
 
 
 class TacoTrainingHelper(Helper):
-	def __init__(self, batch_size, targets, hparams, gta, evaluating, global_step):
+	def __init__(self, batch_size, targets, hparams, gta, evaluating, global_step, tfr=True):
 		# inputs is [N, T_in], targets is [N, T_out, D]
 		with tf.name_scope('TacoTrainingHelper'):
 			self._batch_size = batch_size
@@ -71,6 +71,7 @@ class TacoTrainingHelper(Helper):
 			self.eval = evaluating
 			self._hparams = hparams
 			self.global_step = global_step
+			self.tfr = tfr
 
 			r = self._reduction_factor
 			# Feed every r-th target frame as input
@@ -103,7 +104,7 @@ class TacoTrainingHelper(Helper):
 		elif self.eval and self._hparams.tacotron_natural_eval:
 			self._ratio = tf.convert_to_tensor(0.) #Force eval model to always feed predictions
 		else:
-			if self._hparams.tacotron_teacher_forcing_mode == 'scheduled':
+			if self.tfr and self._hparams.tacotron_teacher_forcing_mode == 'scheduled':
 				self._ratio = _teacher_forcing_ratio_decay(self._hparams.tacotron_teacher_forcing_init_ratio,
 					self.global_step, self._hparams)
 

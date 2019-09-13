@@ -51,7 +51,7 @@ def build_from_path(hparams, args, in_dir, mel_dir, linear_dir, audio_dir, spk_e
 			text = parts[1]
 			emt_label = parts[2]
 			if args.dataset == 'emth':
-				spk_label = -1
+				spk_label = 1
 			elif args.dataset == 'emt4':
 				spk_label = 0
 			else:

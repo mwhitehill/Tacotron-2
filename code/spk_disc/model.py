@@ -39,7 +39,10 @@ def train(path, args):
     # draw graph
     feeder = Feeder(args.train_filename, args, hparams)
 
+    output_classes = max([int(f) for f in feeder.total_emt]) if args.model_type in ['emt', 'accent'] else max([int(f) for f in feeder.total_spk])
+
     batch = tf.placeholder(shape= [args.N*args.M, None, config.n_mels], dtype=tf.float32)  # input batch (time x batch x n_mel)
+    labels = tf.placeholder(shape=[args.N * args.M],dtype=tf.int32)
     lr = tf.placeholder(dtype= tf.float32)  # learning rate
     global_step = tf.Variable(0, name='global_step', trainable=False)
     w = tf.get_variable("w", initializer= np.array([10], dtype=np.float32))
@@ -49,20 +52,32 @@ def train(path, args):
     print("Training {} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
                                strides=(2, 2),
-                               is_training=True, scope='reference_encoder', depth=hparams.reference_depth)  # [N, 128])
+                               is_training=True, scope='Tacotron_model/inference/reference_encoder', depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
 
-    # loss
-    sim_matrix = similarity(embedded, w, b, args.N, args.M, P=hparams.reference_depth)
-    print("similarity matrix size: ", sim_matrix.shape)
-    loss = loss_cal(sim_matrix, args.N, args.M, type=config.loss)
+    if args.discriminator:
+        logit = tf.layers.dense(embedded, output_classes)
+        labels_one_hot = tf.one_hot(tf.to_int32(labels), output_classes)
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
+        acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1),predictions=tf.argmax(logit, 1))
+    else:
+        # loss
+        sim_matrix = similarity(embedded, w, b, args.N, args.M, P=hparams.reference_depth)
+        print("similarity matrix size: ", sim_matrix.shape)
+        loss = loss_cal(sim_matrix, args.N, args.M, type=config.loss)
+        acc_op = tf.constant(1.)
 
     # optimizer operation
     trainable_vars= tf.trainable_variables()                # get variable list
     optimizer= optim(lr)                                    # get optimizer (type is determined by configuration)
     grads, vars= zip(*optimizer.compute_gradients(loss))    # compute gradients of variables with respect to loss
-    grads_clip, _ = tf.clip_by_global_norm(grads, 3.0)      # l2 norm clipping by 3
-    grads_rescale= [0.01*grad for grad in grads_clip[:2]] + grads_clip[2:]   # smaller gradient scale for w, b
+
+    if args.discriminator:
+        grads_rescale = grads
+    else:
+        grads_clip, _ = tf.clip_by_global_norm(grads, 3.0)      # l2 norm clipping by 3
+        grads_rescale= [0.01*grad for grad in grads_clip[:2]] + grads_clip[2:]   # smaller gradient scale for w, b
+
     train_op= optimizer.apply_gradients(zip(grads_rescale, vars), global_step= global_step)   # gradient update operation
 
     # check variables memory
@@ -74,9 +89,11 @@ def train(path, args):
     merged = tf.summary.merge_all()
     saver = tf.train.Saver(max_to_keep=20)
     loss_window = ValueWindow(100)
+    acc_window = ValueWindow(100)
 
     # training session
     with tf.Session() as sess:
+        tf.local_variables_initializer().run()
         tf.global_variables_initializer().run()
 
         checkpoint_folder = os.path.join(path, "checkpoints",timestamp)
@@ -103,16 +120,24 @@ def train(path, args):
         lr_factor = 1   # lr decay factor ( 1/2 per 10000 iteration)
 
         for iter in range(config.iteration):
+            if args.discriminator:
+                batch_iter, _, labels_iter = feeder.random_batch_disc()
+            else:
+                batch_iter, _, labels_iter = feeder.random_batch()
             # run forward and backward propagation and update parameters
-            step, _, loss_cur, summary = sess.run([global_step, train_op, loss, merged],
-                                  feed_dict={batch: feeder.random_batch()[0], lr: config.lr*lr_factor})
+            step, _, loss_cur, summary, acc_cur,lbls = sess.run([global_step, train_op, loss, merged, acc_op,labels],
+                                  feed_dict={batch:batch_iter, labels:labels_iter, lr: config.lr*lr_factor})
 
             loss_window.append(loss_cur)
+            acc_window.append(acc_cur)
 
             if step % 10 == 0:
                 writer.add_summary(summary, step)   # write at tensorboard
             if (step+1) % 20 == 0:
-                print("(iter : %d) loss: %.4f" % ((step+1),loss_window.average))
+                messsage = "(iter : %d) loss: %.4f" % ((step+1),loss_window.average)
+                if args.discriminator:
+                    messsage += ', acc: {:.2f}%'.format(acc_window.average)
+                print(messsage)
 
             lr_changed=False
             if args.model_type == 'emt':
@@ -160,7 +185,7 @@ def get_embeddings(path, args):
     # embedded = triple_lstm(batch)
     print("{} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
-                               strides=(2, 2), is_training=True, scope='reference_encoder',
+                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/reference_encoder',
                                depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
 

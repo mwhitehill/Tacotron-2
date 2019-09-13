@@ -77,10 +77,8 @@ def add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, s
 
 def model_train_mode(args, feeder, hparams, global_step):
 	with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
-		model_name = None
-		if args.model == 'Tacotron-2':
-			model_name = 'Tacotron'
-		model = create_model(model_name or args.model, hparams)
+		model_name='Tacotron_emt_attn' if args.emt_attn else 'Tacotron'
+		model = create_model(model_name, hparams)
 		if hparams.predict_linear:
 			raise ValueError('predict linear not implemented')
 			model.initialize(args, feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
@@ -95,13 +93,20 @@ def model_train_mode(args, feeder, hparams, global_step):
 			ref_mel_up_emt = feeder.ref_mel_up_emt if args.unpaired else None
 			ref_mel_up_spk = feeder.ref_mel_up_spk if args.unpaired else None
 
+			ref_mel_emt = feeder.ref_mel_emt if not(args.flip_spk_emt) else feeder.ref_mel_spk
+			ref_mel_spk = feeder.ref_mel_spk if not (args.flip_spk_emt) else feeder.ref_mel_emt
+			emt_labels = feeder.emt_labels if not (args.flip_spk_emt) else feeder.spk_labels
+			spk_labels = feeder.spk_labels if not (args.flip_spk_emt) else feeder.emt_labels
+			n_emt = len(feeder.total_emt) if not (args.flip_spk_emt) else len(feeder.total_spk)
+			n_spk = len(feeder.total_spk) if not (args.flip_spk_emt) else len(feeder.total_emt)
+
 			model.initialize(args, feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
 				targets_lengths=feeder.targets_lengths, global_step=global_step,
-				is_training=True, split_infos=feeder.split_infos, emt_labels = feeder.emt_labels, spk_labels = feeder.spk_labels,
-				emt_up_labels = emt_up_labels, spk_up_labels = spk_up_labels, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
+				is_training=True, split_infos=feeder.split_infos, emt_labels = emt_labels, spk_labels = spk_labels,
+				emt_up_labels = emt_up_labels, spk_up_labels = spk_up_labels, ref_mel_emt=ref_mel_emt, ref_mel_spk=ref_mel_spk,
 				ref_mel_up_emt=ref_mel_up_emt, ref_mel_up_spk=ref_mel_up_spk, use_emt_disc = args.emt_disc,
 				use_spk_disc = args.spk_disc, use_intercross=args.intercross, use_unpaired=args.unpaired,
-				n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
+				n_emt=n_emt, n_spk=n_spk)
 		model.add_loss()
 		model.add_optimizer(global_step)
 		stats = add_train_stats(model, hparams)
@@ -109,10 +114,8 @@ def model_train_mode(args, feeder, hparams, global_step):
 
 def model_test_mode(args, feeder, hparams, global_step):
 	with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
-		model_name = None
-		if args.model == 'Tacotron-2':
-			model_name = 'Tacotron'
-		model = create_model(model_name or args.model, hparams)
+		model_name = 'Tacotron_emt_attn' if args.emt_attn else 'Tacotron'
+		model = create_model(model_name, hparams)
 		if hparams.predict_linear:
 			raise ValueError('predict linear not implemented')
 			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
@@ -122,11 +125,19 @@ def model_test_mode(args, feeder, hparams, global_step):
 				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross,
 				n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
 		else:
+
+			ref_mel_emt = feeder.eval_ref_mel_emt if not(args.flip_spk_emt) else feeder.eval_ref_mel_spk
+			ref_mel_spk = feeder.eval_ref_mel_spk if not (args.flip_spk_emt) else feeder.eval_ref_mel_emt
+			emt_labels = feeder.eval_emt_labels if not (args.flip_spk_emt) else feeder.eval_spk_labels
+			spk_labels = feeder.eval_spk_labels if not (args.flip_spk_emt) else feeder.eval_emt_labels
+			n_emt = len(feeder.total_emt) if not (args.flip_spk_emt) else len(feeder.total_spk)
+			n_spk = len(feeder.total_spk) if not (args.flip_spk_emt) else len(feeder.total_emt)
+
 			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
 				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
-				split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels, spk_labels = feeder.spk_labels,
-				ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross, n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
+				split_infos=feeder.eval_split_infos, emt_labels=emt_labels, spk_labels=spk_labels,
+				ref_mel_emt=ref_mel_emt, ref_mel_spk= ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+				use_intercross=args.intercross, n_emt = n_emt, n_spk =n_spk)
 		model.add_loss()
 		return model
 
@@ -174,6 +185,9 @@ def train(log_dir, args, hparams):
 	global_step = tf.Variable(0, name='global_step', trainable=False)
 	model, stats = model_train_mode(args, feeder, hparams, global_step)
 	eval_model = model_test_mode(args, feeder, hparams, global_step)
+	if args.TEST:
+		for v in tf.global_variables():
+			print(v)
 
 	#Embeddings metadata
 	char_embedding_meta = os.path.join(meta_folder, 'CharacterEmbeddings.tsv')
@@ -219,6 +233,24 @@ def train(log_dir, args, hparams):
 
 	saver = tf.train.Saver(max_to_keep=args.max_to_keep)
 
+	if args.opt_ref_no_mo and not(args.restart_optimizer_r):
+		print("WILL ATTEMPT TO RESTORE OPTIMIZER R - SET ARGS.RESTART_OPTIMIZER_R IF RETRAINING A MODEL THAT DIDN'T HAVE THE OPTIMIZER R")
+
+	assert(not(args.restart_nat_gan_d and args.restore_nat_gan_d_sep))
+
+	var_list = tf.global_variables()
+	var_list = [v for v in var_list if not ('reference_encoder' in v.name)]
+	var_list = [v for v in var_list if not ('nat_gan' in v.name or 'optimizer_n' in v.name)] if (args.restart_nat_gan_d or args.restore_nat_gan_d_sep) else var_list
+	var_list = [v for v in var_list if not ('optimizer_r' in v.name or 'optimizer_3' in v.name)] if args.restart_optimizer_r else var_list
+	saver_restore = tf.train.Saver(var_list=var_list)
+
+	if args.emt_attn and args.unpaired and args.pretrained_emt_disc:
+		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('reference_encoder' in v.name)])
+
+	if args.nat_gan:
+		saver_nat_gan = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('nat_gan' in v.name or 'optimizer_n' in v.name)])
+		save_dir_nat_gan = r'nat_gan/pretrained_model'
+
 	log('Tacotron training set to a maximum of {} steps'.format(args.tacotron_train_steps))
 	if hparams.tacotron_fine_tuning:
 		print('FINE TUNING SET TO TRUE - MAKE SURE THIS IS WHAT YOU WANT!')
@@ -244,17 +276,27 @@ def train(log_dir, args, hparams):
 
 					if (checkpoint_state and checkpoint_state.model_checkpoint_path):
 						log('Loading checkpoint {}'.format(checkpoint_state.model_checkpoint_path), slack=True)
-						saver.restore(sess, checkpoint_state.model_checkpoint_path)
+						saver_restore.restore(sess, checkpoint_state.model_checkpoint_path)
 
 					else:
-						log('No model to load at {}'.format(save_dir), slack=True)
-						saver.save(sess, checkpoint_path, global_step=global_step)
+						raise ValueError('No model to load at {}'.format(save_dir))
 
 				except tf.errors.OutOfRangeError as e:
 					log('Cannot restore checkpoint: {}'.format(e), slack=True)
 			else:
 				log('Starting new training!', slack=True)
 				saver.save(sess, checkpoint_path, global_step=global_step)
+
+			if args.emt_attn and args.unpaired and args.pretrained_emt_disc:
+				save_dir_emt = r'spk_disc/pretrained_model'
+				checkpoint_state_emt = tf.train.get_checkpoint_state(save_dir_emt)
+				saver_restore_emt_disc.restore(sess, checkpoint_state_emt.model_checkpoint_path)
+				log('Loaded Emotion Discriminator from checkpoint {}'.format(checkpoint_state_emt.model_checkpoint_path), slack=True)
+
+			if args.nat_gan and args.restore_nat_gan_d_sep:
+				checkpoint_state_nat_gan = tf.train.get_checkpoint_state(save_dir_nat_gan)
+				saver_nat_gan.restore(sess, checkpoint_state_nat_gan.model_checkpoint_path)
+				log('Loaded Nat Gan Discriminator from checkpoint {}'.format(checkpoint_state_nat_gan.model_checkpoint_path), slack=True)
 
 			#initializing feeder
 			feeder.start_threads(sess)
@@ -285,53 +327,70 @@ def train(log_dir, args, hparams):
 				#
 				# out = sess.run([vars])
 
-
+				if args.nat_gan and (args.restart_nat_gan_d or not(args.restore)) and step ==0:
+					log("Will start with Training Nat GAN Discriminator", end='\r')
+					disc_epochs = 300 if args.unpaired else 200
+					disc_epochs = 0 if args.TEST else disc_epochs
+					for i in range(disc_epochs+1):
+						d_loss_t, d_loss_p, d_loss_up, opt_n = sess.run([model.d_loss_targ, model.d_loss_p, model.d_loss_up, model.optimize_n])
+						message = 'step: {}, d_loss_t={:.5f}, d_loss_p ={:.5f}, d_loss_up ={:.5f}'.format(i, d_loss_t, d_loss_p, d_loss_up)
+						log(message, end='\r')
+					os.makedirs(r'nat_gan',exist_ok=True)
+					os.makedirs(r'nat_gan/pretrained_model', exist_ok=True)
+					checkpoint_path_nat_gan = os.path.join(save_dir_nat_gan, 'nat_gan_model.ckpt')
+					saver_nat_gan.save(sess, checkpoint_path_nat_gan, global_step=i)
 
 				if args.nat_gan:
-					step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
-					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk,\
-					d_loss_t, d_loss_p, d_loss_up, g_loss_p, g_loss_up,opt_d = sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
-									model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
-									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt, model.style_emb_loss_mel_out_up_spk,
-									model.d_loss_targ, model.d_loss_p, model.d_loss_up, model.g_loss_p, model.g_loss_up,model.optimize_d])
-				elif args.unpaired:
-					step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
-					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk, mels,ref_emt,ref_spk,ref_up_emt,ref_up_spk,emb,enc_out,enc_out_up,\
-					stop_pred, targ, inp, inp_len,targ_len,stop_targ,mels_up,dec_out,dec_out_up\
-					= sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
-									model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
+					d_loss_t, d_loss_p, d_loss_up, opt_n = sess.run([model.d_loss_targ, model.d_loss_p, model.d_loss_up, model.optimize_n])
+
+				if args.unpaired:
+					step, tfr, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
+					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk, g_loss_p, g_loss_up, mels, opt_r\
+					= sess.run([global_step, model.ratio, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
+									model.regularization_loss, model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
 									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt,
-											model.style_emb_loss_mel_out_up_spk,model.tower_mel_outputs[0],
-											model.tower_refnet_out_emt[0],model.tower_refnet_out_spk[0],model.tower_refnet_out_up_emt[0],model.tower_refnet_out_up_spk[0],
-											model.tower_embedded_inputs[0], model.tower_encoder_outputs[0],model.tower_encoder_outputs_up[0],model.tower_stop_token_prediction[0],
-											model.tower_mel_targets[0],model.tower_inputs[0],model.tower_input_lengths[0],model.tower_targets_lengths[0],
-											model.tower_stop_token_targets[0],model.tower_mel_outputs_up[0],model.tower_decoder_output[0],model.tower_decoder_output_up[0]])#,model.optimize_r])
+											model.style_emb_loss_mel_out_up_spk,model.g_loss_p, model.g_loss_up, model.tower_mel_outputs[0], model.optimize_r])
+
+				else:
+					step, tfr, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
+					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk, g_loss_p, g_loss_up, mels,dec_out,opt_r = sess.run([global_step, model.helper._ratio, model.loss,
+									model.optimize, model.before_loss, model.after_loss, model.stop_token_loss,
+									model.regularization_loss, model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
+									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt,
+									model.style_emb_loss_mel_out_up_spk, model.g_loss_p, model.g_loss_up, model.tower_mel_outputs[0],model.tower_decoder_output[0],model.optimize_r])
+
+
+					# step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
+					# loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk, g_loss_p, g_loss_up, mels,ref_emt,ref_spk,ref_up_emt,ref_up_spk,emb,enc_out,enc_out_up,\
+					# stop_pred, targ, inp, inp_len,targ_len,stop_targ,mels_up,dec_out,dec_out_up,opt_r\
+					# = sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
+					# 				model.regularization_loss, model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
+					# 				model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt,
+					# 						model.style_emb_loss_mel_out_up_spk,model.g_loss_p, model.g_loss_up, model.tower_mel_outputs[0],
+					# 						model.tower_refnet_out_emt[0],model.tower_refnet_out_spk[0],model.tower_refnet_out_up_emt[0],model.tower_refnet_out_up_spk[0],
+					# 						model.tower_embedded_inputs[0], model.tower_encoder_outputs[0],model.tower_encoder_outputs_up[0],model.tower_stop_token_prediction[0],
+					# 						model.tower_mel_targets[0],model.tower_inputs[0],model.tower_input_lengths[0],model.tower_targets_lengths[0],
+					# 						model.tower_stop_token_targets[0],model.tower_mel_outputs_up[0],model.tower_decoder_output[0],model.tower_decoder_output_up[0],model.optimize_r])
+					#
+					# if args.save_output_vars:
+					# 	import pandas as pd
+					# 	pd.DataFrame(emb[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\emb.csv')
+					# 	pd.DataFrame(enc_out[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\enc_out.csv')
+					# 	pd.DataFrame(enc_out_up[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\enc_out_up.csv')
+					# 	pd.DataFrame(stop_pred[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\stop.csv')
+					# 	pd.DataFrame(targ[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\targ.csv')
+					# 	pd.DataFrame(inp[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\inp.csv')
+					# 	pd.DataFrame(inp_len[:]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\inp_len.csv')
+					# 	pd.DataFrame(targ_len[:]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\targ_len.csv')
+					# 	pd.DataFrame(stop_targ[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\stop_targ.csv')
+					# 	pd.DataFrame(mels_up[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\mels_up.csv')
+					# 	pd.DataFrame(dec_out_up[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\dec_out_up.csv')
+
 
 					if args.save_output_vars:
 						import pandas as pd
-						pd.DataFrame(emb[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\emb.csv')
-						pd.DataFrame(enc_out[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\enc_out.csv')
-						pd.DataFrame(enc_out_up[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\enc_out_up.csv')
-						pd.DataFrame(stop_pred[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\stop.csv')
-						pd.DataFrame(targ[:, 0, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\targ.csv')
-						pd.DataFrame(inp[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\inp.csv')
-						pd.DataFrame(inp_len[:]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\inp_len.csv')
-						pd.DataFrame(targ_len[:]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\targ_len.csv')
-						pd.DataFrame(stop_targ[:, :]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\stop_targ.csv')
-						pd.DataFrame(mels_up[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\mels_up.csv')
-						pd.DataFrame(dec_out_up[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\dec_out_up.csv')
-
-				else:
-					step, loss, opt, bef, aft, stop, reg, loss_emt, loss_spk, loss_orthog, \
-					loss_up_emt, loss_up_spk, loss_mo_up_emt, loss_mo_up_spk,mels,dec_out = sess.run([global_step, model.loss, model.optimize,model.before_loss, model.after_loss,model.stop_token_loss,
-									model.regularization_loss,model.style_emb_loss_emt, model.style_emb_loss_spk, model.style_emb_orthog_loss,
-									model.style_emb_loss_up_emt, model.style_emb_loss_up_spk,model.style_emb_loss_mel_out_up_emt, model.style_emb_loss_mel_out_up_spk,
-																																							 model.tower_mel_outputs[0],model.tower_decoder_output[0]])
-
-				if args.save_output_vars:
-					import pandas as pd
-					pd.DataFrame(mels[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\mels.csv')
-					pd.DataFrame(dec_out[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\dec_out.csv')
+						pd.DataFrame(mels[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\mels.csv')
+						pd.DataFrame(dec_out[:, 0, 0:5]).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\mels_save\dec_out.csv')
 
 				# import pandas as pd
 				# print(emt_logit.shape, emt_labels.shape)
@@ -371,16 +430,19 @@ def train(log_dir, args, hparams):
 					g_loss_p_window.append(g_loss_p)
 					g_loss_up_window.append(g_loss_up)
 
-				message = 'Step {:7d} {:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}, bef={:.5f}, aft={:.5f}, stop={:.5f}, ' \
-									'reg={:.5f}, emt={:.5f}, spk={:.5f}, orthog={:.5f},'.format(step,time_window.average,loss,loss_window.average,
+				message = 'Step {:7d} {:.3f} sec/step, tfr={:.3f}, loss={:.5f}, avg_loss={:.5f}, bef={:.5f}, aft={:.5f}, stop={:.5f}, reg={:.5f}'.format(step,time_window.average,tfr, loss,loss_window.average,
 																															loss_bef_window.average, loss_aft_window.average,
-																															loss_stop_window.average, loss_reg_window.average,
-																															loss_emt_window.average,loss_spk_window.average,
-																															loss_orthog_window.average)
-				message += ' up_emt={:.5f}, up_spk={:.5f}, mo_up_emt={:.5f}, mo_up_spk={:.5f}'.format(loss_up_emt_window.average,
-																																															 loss_up_spk_window.average,
-																																															 loss_mo_up_emt_window.average,
-																																															 loss_mo_up_spk_window.average)
+																															loss_stop_window.average, loss_reg_window.average)
+				if args.emt_attn:
+					message += ' emt={:.5f}, spk={:.5f}, spk_l2={:.5f}'.format(loss_emt_window.average, loss_spk_window.average, loss_orthog_window.average)
+				else:
+					message += ' emt={:.5f}, spk={:.5f}, orthog={:.5f},'.format(loss_emt_window.average, loss_spk_window.average,
+																																			loss_orthog_window.average)
+				if args.unpaired:
+					message += ' up_emt={:.5f}, up_spk={:.5f}, mo_up_emt={:.5f}, mo_up_spk={:.5f}'.format(loss_up_emt_window.average,
+																																																 loss_up_spk_window.average,
+																																																 loss_mo_up_emt_window.average,
+																																																 loss_mo_up_spk_window.average)
 				if args.nat_gan:
 					message += ' d_loss_t={:.5f}, d_loss_p ={:.5f}, d_loss_up ={:.5f}, g_loss_p ={:.5f}, g_loss_up ={:.5f}'.format(
 						d_loss_t_window.average, d_loss_p_window.average, d_loss_up_window.average, g_loss_p_window.average, g_loss_up_window.average)
@@ -513,44 +575,64 @@ def train(log_dir, args, hparams):
 						# 	max_len=target_length, auto_aspect=True)
 
 					else:
-						input_seq, mel_prediction, alignment, target, target_length, emt, spk = sess.run([
-							eval_model.tower_inputs[0][0],
-							eval_model.tower_mel_outputs[0][0],
-							eval_model.tower_alignments[0][0],
-							eval_model.tower_mel_targets[0][0],
-							eval_model.tower_targets_lengths[0][0],
-							eval_model.tower_emt_labels[0][0],
-							eval_model.tower_spk_labels[0][0],
+						input_seqs, mel_predictions, alignments, targets, target_lengths, emts, spks, alignments_emt = sess.run([
+							eval_model.tower_inputs[0],
+							eval_model.tower_mel_outputs[0],
+							eval_model.tower_alignments[0],
+							eval_model.tower_mel_targets[0],
+							eval_model.tower_targets_lengths[0],
+							eval_model.tower_emt_labels[0],
+							eval_model.tower_spk_labels[0],
+							eval_model.tower_alignments_emt
 							])
 
-					#save predicted mel spectrogram to disk (debug)
-					mel_filename = 'mel-prediction-step-{}.npy'.format(step)
-					np.save(os.path.join(mel_dir, mel_filename), mel_prediction.T, allow_pickle=False)
+						num_evals = len(input_seqs) if False else 1
+						for i in range(num_evals):
+							input_seq = input_seqs[i]
+							mel_prediction = mel_predictions[i]
+							alignment = alignments[i]
+							target = targets[i]
+							target_length = target_lengths[i]
+							emt = emts[i]
+							spk = spks[i]
+							if args.emt_attn and args.attn=='simple':
+								alignment_emt = alignments_emt[0][i]
 
-					folder_bucket = 'step_{}'.format(step//500)
-					folder_wavs_save = os.path.join(wav_dir,folder_bucket)
-					folder_plot_save = os.path.join(plot_dir,folder_bucket)
-					os.makedirs(folder_wavs_save, exist_ok=True)
-					os.makedirs(folder_plot_save, exist_ok=True)
+							#save predicted mel spectrogram to disk (debug)
+							mel_filename = 'mel-prediction-step-{}_{}.npy'.format(step,i)
+							np.save(os.path.join(mel_dir, mel_filename), mel_prediction.T, allow_pickle=False)
 
-					#save griffin lim inverted wav for debug (mel -> wav)
-					if hparams.GL_on_GPU:
-						wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_prediction})
-						wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
-					else:
-						wav = audio.inv_mel_spectrogram(mel_prediction.T, hparams)
-					audio.save_wav(wav, os.path.join(folder_wavs_save, 'step-{}-wave-from-mel.wav'.format(step)), sr=hparams.sample_rate)
+							folder_bucket = 'step_{}'.format(step//500)
+							folder_wavs_save = os.path.join(wav_dir,folder_bucket)
+							folder_plot_save = os.path.join(plot_dir,folder_bucket)
+							os.makedirs(folder_wavs_save, exist_ok=True)
+							os.makedirs(folder_plot_save, exist_ok=True)
 
-					input_seq = sequence_to_text(input_seq)
-					#save alignment plot to disk (control purposes)
-					plot.plot_alignment(alignment, os.path.join(folder_plot_save, 'step-{}-align.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
-						max_len=target_length // hparams.outputs_per_step)
-					#save real and predicted mel-spectrogram plot to disk (control purposes)
-					plot.plot_spectrogram(mel_prediction, os.path.join(folder_plot_save, 'step-{}-mel-spectrogram.png'.format(step)),
-						title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk), input_seq), target_spectrogram=target,
-						max_len=target_length)
-					log('Input at step {}: {}'.format(step, input_seq))
+							#save griffin lim inverted wav for debug (mel -> wav)
+							if hparams.GL_on_GPU:
+								wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_prediction})
+								wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+							else:
+								wav = audio.inv_mel_spectrogram(mel_prediction.T, hparams)
+							audio.save_wav(wav, os.path.join(folder_wavs_save, 'step-{}-{}-wave-from-mel.wav'.format(step,i)), sr=hparams.sample_rate)
+
+							input_seq = sequence_to_text(input_seq)
+							#save alignment plot to disk (control purposes)
+							try:
+								plot.plot_alignment(alignment, os.path.join(folder_plot_save, 'step-{}-{}-align.png'.format(step, i)),
+									title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
+									max_len=target_length // hparams.outputs_per_step)
+								if args.emt_attn and args.attn=='simple':
+									plot.plot_alignment(alignment_emt, os.path.join(folder_plot_save, 'step-{}-{}-align_emt.png'.format(step, i)),
+										title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
+										max_len=target_length // hparams.outputs_per_step)
+								#save real and predicted mel-spectrogram plot to disk (control purposes)
+								plot.plot_spectrogram(mel_prediction, os.path.join(folder_plot_save, 'step-{}-{}-mel-spectrogram.png'.format(step, i)),
+									title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk), input_seq), target_spectrogram=target,
+									max_len=target_length)
+							except:
+								print("failed to plot alignment and spectrogram")
+							log('Input at step {}: {}'.format(step, input_seq), end='\r')
 
 				# if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == 1:
 				# 	#Get current checkpoint state

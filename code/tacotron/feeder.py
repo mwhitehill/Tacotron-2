@@ -106,9 +106,14 @@ class Feeder:
 		self._metadata_df['train_test'] = 'train'
 		self._metadata_df.iloc[np.array(sorted(test_indices))-1,-1] = 'test'
 		self.df_meta_train = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'train']
+		# pd.DataFrame(self._train_meta).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test_meta\meta_train.csv')
+		# pd.DataFrame(self._test_meta).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test_meta\meta_test.csv')
 
 		self.total_emt = self._metadata_df.emt_label.unique()
 		self.total_spk = self._metadata_df.spk_label.unique()
+
+		self.emt_list = self.total_emt[self.total_emt != '0'] if self._args.no_general else self.total_emt
+		self.spk_list = self.total_spk[self.total_spk != '0'] if self._args.no_general else self.total_spk
 
 		self.test_steps = args.tacotron_test_steps #len(self._test_meta) // hparams.tacotron_batch_size
 
@@ -256,6 +261,10 @@ class Feeder:
 		ref_mel_emt = mel_target
 		ref_mel_spk = mel_target
 
+		assert((ref_mel_emt == mel_target).all()) #using the mel target lengths as the lengths for attention, must adjust accordingly
+
+		# print("in gen", dataset, input_data[0:5], mel_target[0][0:5], emt_label, spk_label)
+
 		# return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
 		return (input_data, mel_target, token_target, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
 
@@ -355,8 +364,19 @@ class Feeder:
 		emt_up_label=emt_label.copy()
 		spk_up_label=spk_label.copy()
 
-		if self._args.intercross_both:
-			chosen_cross = np.random.choice(['emt','spk'])
+		if self._args.emt_only:
+			ref_mel_spk = np.zeros((1,80))
+			# find all mels with same emotion type
+			df_meta_same_style = self.df_meta_train[self.df_meta_train['dataset'].isin(['emt4', 'emth'])]
+			df_meta_same_style = df_meta_same_style[df_meta_same_style['emt_label'] == emt_label]
+
+			# select one mel from same style to use as reference
+			idx = np.random.choice(df_meta_same_style.index)
+			mel_name_same_style = df_meta_same_style.loc[idx, 'mel_filename']
+			dataset_same_style = df_meta_same_style.loc[idx, 'dataset']
+			ref_mel_emt = np.load(os.path.join(self.data_folder, dataset_same_style, 'mels', mel_name_same_style))
+		elif self._args.intercross_both or self._args.intercross_spk_only:
+			chosen_cross = np.random.choice(['emt','spk']) if self._args.intercross_spk_only else 'spk'
 			label = emt_label if chosen_cross == 'emt' else spk_label
 			column_name = 'emt_label' if chosen_cross == 'emt' else 'spk_label'
 			df_meta_same_style = self.df_meta_train[self.df_meta_train.loc[:, column_name] == label]
@@ -368,7 +388,6 @@ class Feeder:
 
 			ref_mel_emt = ref_mel_same_style if chosen_cross=='emt' else mel_target
 			ref_mel_spk = mel_target if chosen_cross == 'emt' else ref_mel_same_style
-
 		else:
 			if dataset == 'emt4' or dataset == 'emth': #np.random.choice(['emt','spk']) == 'emt':
 				ref_mel_spk = mel_target
@@ -397,25 +416,33 @@ class Feeder:
 
 		if self._args.unpaired:
 			# chose a random emotion and a random spk id (this keeps it even amongst all classes)
-			emt_up_label = np.random.choice(self.total_emt)
-			spk_up_label = np.random.choice(self.total_spk)
-			df_meta_same_emt = self.df_meta_train[self.df_meta_train.loc[:, 'emt_label'] == emt_up_label]
-			df_meta_same_spk = self.df_meta_train[self.df_meta_train.loc[:, 'spk_label'] == spk_up_label]
-			for i, df in enumerate([df_meta_same_emt,df_meta_same_spk]):
-				idx = np.random.choice(df.index)
-				mel_name_up = df.loc[idx, 'mel_filename']
-				dataset_up = df.loc[idx, 'dataset']
-				mel = np.load(os.path.join(self.data_folder, dataset_up, 'mels', mel_name_up))
-				if i == 0:
-					ref_mel_up_emt = mel.copy()
-				else:
-					ref_mel_up_spk = mel.copy()
+			if self._args.up_ref_match_p:
+				emt_up_label = emt_label
+				spk_up_label = spk_label
+				ref_mel_up_emt = ref_mel_emt
+				ref_mel_up_spk = ref_mel_spk
+			else:
+				emt_up_label = np.random.choice(self.emt_list)
+				spk_up_label = np.random.choice(self.spk_list)
+				df_meta_same_emt = self.df_meta_train[self.df_meta_train.loc[:, 'emt_label'] == emt_up_label]
+				df_meta_same_spk = self.df_meta_train[self.df_meta_train.loc[:, 'spk_label'] == spk_up_label]
+				for i, df in enumerate([df_meta_same_emt,df_meta_same_spk]):
+					idx = np.random.choice(df.index)
+					mel_name_up = df.loc[idx, 'mel_filename']
+					dataset_up = df.loc[idx, 'dataset']
+					mel = np.load(os.path.join(self.data_folder, dataset_up, 'mels', mel_name_up))
+					if i == 0:
+						ref_mel_up_emt = mel.copy()
+					else:
+						ref_mel_up_spk = mel.copy()
 
 		if self._args.TEST_INPUTS:
 			ref_mel_emt = np.ones((30,hparams.num_mels))
 			ref_mel_spk = np.ones((30, hparams.num_mels))
 			ref_mel_up_emt = np.ones((30, hparams.num_mels))
 			ref_mel_up_spk = np.ones((30, hparams.num_mels))
+
+		# print("in gen", dataset, input_data[0:5], mel_target[0][0:5], emt_label, spk_label)
 
 		# return (input_data, mel_target, token_target, linear_target, spk_emb, emt_label, spk_label, ref_mel_emt, ref_mel_spk, len(mel_target))
 		return (input_data, mel_target, token_target, emt_label, spk_label, ref_mel_emt, ref_mel_spk, emt_up_label, spk_up_label,
@@ -494,12 +521,20 @@ class Feeder:
 				mel_refs_up_spk_cur_device, mel_refs_up_spk_max_len = self._prepare_targets([x[IDX_REF_UP_SPK] for x in batch],outputs_per_step)
 				mel_refs_up_spk = np.concatenate((mel_refs_up_spk, mel_refs_up_spk_cur_device),axis=1) if mel_refs_up_spk is not None else mel_refs_up_spk_cur_device
 
+			if self._args.flip_spk_emt:
+				mel_refs_emt_max_len_tmp = eval(mel_refs_emt_max_len)
+				mel_refs_emt_max_len = eval(mel_refs_spk_max_len)
+				mel_refs_spk_max_len = eval(mel_refs_emt_max_len_tmp)
 
 			split_infos.append([input_max_len, mel_target_max_len, token_target_max_len, linear_target_max_len,
 													hparams.tacotron_spk_emb_dim, mel_refs_emt_max_len, mel_refs_spk_max_len,
 													mel_refs_up_emt_max_len,mel_refs_up_spk_max_len])
 
 		split_infos = np.asarray(split_infos, dtype=np.int32)
+
+		# print("NEW BATCH")
+		# for i in range(self._hparams.tacotron_batch_size):
+		# 	print("in batch, TRAIN=", TRAIN, inputs[i][0:5], mel_targets[i][0][0:5], emt_labels[i], spk_labels[i])
 
 		# return (inputs, input_lengths, mel_targets, token_targets, linear_targets, targets_lengths, split_infos, emt_labels,
 		# 			spk_labels, spk_embs, mel_refs_emt, mel_refs_spk)
@@ -547,14 +582,21 @@ def test():
 	args = parser.parse_args()
 
 	args.tacotron_test_steps = 3
-	args.remove_long_samps = False#True
+	args.remove_long_samps = True
 	args.test_max_len = False#True
-	args.unpaired = True#False#True
+	args.unpaired = False#False#True
 	args.TEST = True
 	args.intercross_both = False
+	args.TEST_INPUTS = False
+	args.no_general = False#True
+	args.emt_attn = True
+	EVAL = True
 
-	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train_emt4_vctk_emth.txt'
+	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train_emt4_vctk_e40_v15.txt'
 	coord = tf.train.Coordinator()
+
+	# hparams.tacotron_num_gpus = 1
+	# hparams.tacotron_batch_size = 4
 	feeder = Feeder(coord, metadata_filename, hparams, args)
 
 	with tf.Session() as sess:
@@ -563,18 +605,25 @@ def test():
 		# vars = [feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, feeder.linear_targets,
 		# 				feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.spk_emb,
 		# 				feeder.ref_mel_emt, feeder.ref_mel_spk]
-		vars = [feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
-						feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.ref_mel_emt, feeder.ref_mel_spk]
+		vars = [feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+						feeder.eval_targets_lengths, feeder.eval_split_infos, feeder.eval_emt_labels, feeder.eval_spk_labels, feeder.ref_mel_emt,
+						feeder.eval_ref_mel_spk]
+		vars += [feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
+					feeder.targets_lengths, feeder.split_infos, feeder.emt_labels, feeder.spk_labels, feeder.ref_mel_emt, feeder.ref_mel_spk]
 		if args.unpaired:
 			vars += [feeder.emt_up_labels,feeder.spk_up_labels,feeder.ref_mel_up_emt, feeder.ref_mel_up_spk]
 
 		outputs = sess.run(vars)
 
 		if args.unpaired:
-			(inputs, input_lengths, mel_targets, token_targets, targets_lengths, split_infos, emt_labels, spk_labels,
+			(inputs_e, input_lengths_e, mel_targets_e, token_targets_e, targets_lengths_e, split_infos_e, emt_labels_e,
+			 spk_labels_e, ref_mel_emt_e, ref_mel_spk_e,
+			 inputs, input_lengths, mel_targets, token_targets, targets_lengths, split_infos, emt_labels, spk_labels,
 			 ref_mel_emt, ref_mel_spk,emt_up_labels, spk_up_labels, ref_mel_up_emt,ref_mel_up_spk) = outputs
 		else:
-			(inputs, input_lengths, mel_targets, token_targets, targets_lengths, split_infos, emt_labels, spk_labels, ref_mel_emt,
+			(inputs_e, input_lengths_e, mel_targets_e, token_targets_e, targets_lengths_e, split_infos_e, emt_labels_e,
+			 spk_labels_e, ref_mel_emt_e, ref_mel_spk_e,
+			 inputs, input_lengths, mel_targets, token_targets, targets_lengths, split_infos, emt_labels, spk_labels, ref_mel_emt,
 			 ref_mel_spk) = outputs
 
 		print("mel_targets", len(mel_targets), mel_targets[0].shape)

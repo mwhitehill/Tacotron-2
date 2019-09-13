@@ -25,6 +25,8 @@ if __name__ == "__main__":
     parser.add_argument('--time_string', default=None, help='time string of previous saved model')
     parser.add_argument('--restore', action='store_true', default=False,
                         help='whether to restore the model')
+    parser.add_argument('--discriminator', action='store_true', default=False,help='whether to use a discriminator as loss')
+    parser.add_argument('--output_classes', type=int, default=5, help='# classes for discriminator')
     args = parser.parse_args()
     if args.model_type == 'emt':
         print("setting N to 4 for training emotions")

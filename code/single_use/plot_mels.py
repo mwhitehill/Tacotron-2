@@ -76,17 +76,18 @@ def plot_mels_silence():
 
 	folder_data = os.path.join(os.path.dirname(os.getcwd()), 'data')
 
-	dataset='vctk'
-	out_dir = os.path.join(folder_data, dataset + '_test_silence')
-	# out_dir = os.path.join(folder_data, dataset)
-	out_dir = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\vctk_test'
+	# dataset='vctk'
+	# out_dir = os.path.join(folder_data, dataset + '_test_silence')
+	# # out_dir = os.path.join(folder_data, dataset)
+	out_dir = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\jessa'
 
 	mel_dir = os.path.join(out_dir, 'mels')
-	index=0
+	# index=0
 
-	plt.figure()
-	a = np.load(os.path.join(mel_dir, 'mel-{}.npy'.format(index)))
-	plt.imshow(a.T, origin='lower')
+	for i in range(32):
+		plt.figure()
+		a = np.load(os.path.join(mel_dir, 'mel-{}.npy'.format(i)))
+		plt.imshow(a.T, origin='lower')
 	plt.show()
 
 def plot_mels_unpaired():
@@ -103,7 +104,7 @@ def plot_mels_unpaired():
 	# 	plt.title(mel_name)
 	# 	plt.imshow(mel.T, origin='lower')
 
-	for i in range(32):
+	for i in range(3200,3232):
 		mel_name = '{}_up.npy'.format(i)
 		mel = np.load(os.path.join(folder,mel_name))
 		plt.figure()
@@ -121,6 +122,6 @@ def plot_mels_unpaired():
 
 if __name__ == '__main__':
 	# plot_mels()
-	# plot_mels_silence()
+	plot_mels_silence()
 	# test_silence()
-	plot_mels_unpaired()
+	# plot_mels_unpaired()

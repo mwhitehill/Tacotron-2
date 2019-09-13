@@ -34,7 +34,6 @@ def _compute_attention(attention_mechanism, cell_output, attention_state,
 
 	return attention, alignments, next_attention_state, max_attentions
 
-
 def _location_sensitive_score(W_query, W_fil, W_keys):
 	"""Impelements Bahdanau-style (cumulative) scoring function.
 	This attention is described in:
@@ -117,7 +116,8 @@ class LocationSensitiveAttention(BahdanauAttention):
 				 memory_sequence_length=None,
 				 smoothing=False,
 				 cumulate_weights=True,
-				 name='LocationSensitiveAttention'):
+				 name='LocationSensitiveAttention',
+				 use_scope=False):
 		"""Construct the Attention mechanism.
 		Args:
 			num_units: The depth of the query mechanism.
@@ -149,12 +149,13 @@ class LocationSensitiveAttention(BahdanauAttention):
 		#Setting it to None defaults in using softmax
 		normalization_function = _smoothing_normalization if (smoothing == True) else None
 		memory_length = memory_sequence_length if (mask_encoder==True) else None
-		super(LocationSensitiveAttention, self).__init__(
-				num_units=num_units,
-				memory=memory,
-				memory_sequence_length=memory_length,
-				probability_fn=normalization_function,
-				name=name)
+		with tf.variable_scope("attention"):
+			super(LocationSensitiveAttention, self).__init__(
+			num_units=num_units,
+			memory=memory,
+			memory_sequence_length=memory_length,
+			probability_fn=normalization_function,
+			name=name)
 
 		self.location_convolution = tf.layers.Conv1D(filters=hparams.attention_filters,
 			kernel_size=hparams.attention_kernel, padding='same', use_bias=True,
@@ -224,3 +225,36 @@ class LocationSensitiveAttention(BahdanauAttention):
 			next_state = alignments
 
 		return alignments, next_state, max_attentions
+
+
+class SimpleBahdanauAttention():
+	def __init__(self, units, values):
+		super(SimpleBahdanauAttention, self).__init__()
+
+		self.units = units
+		self.values = values
+		with tf.variable_scope("attention_emt"):
+			self.W1 = tf.layers.Dense(units,name='W1')
+			self.W2 = tf.layers.Dense(units,name='W2')
+			self.V = tf.layers.Dense(1,name='V')
+
+	def __call__(self, query):
+		# hidden shape == (batch_size, hidden size)
+		# hidden_with_time_axis shape == (batch_size, 1, hidden size)
+		# we are doing this to perform addition to calculate the score
+		hidden_with_time_axis = tf.expand_dims(query, 1)
+
+		# score shape == (batch_size, max_length, 1)
+		# we get 1 at the last axis because we are applying score to self.V
+		# the shape of the tensor before applying self.V is (batch_size, max_length, units)
+		score = self.V(tf.nn.tanh(self.W1(self.values) + self.W2(hidden_with_time_axis)))
+
+		# attention_weights shape == (batch_size, max_length, 1)
+		attention_weights = tf.nn.softmax(score, dim=1)
+
+		# context_vector shape after sum == (batch_size, hidden_size)
+		context_vector = attention_weights * self.values
+		context_vector = tf.reduce_sum(context_vector, axis=1)
+		attention_weights = tf.squeeze(attention_weights,squeeze_dims=-1)
+
+		return context_vector, attention_weights

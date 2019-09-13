@@ -42,7 +42,7 @@ def norm_data(args):
 
 	print('Selecting data folders..')
 	# supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'M-AILABS']
-	supported_datasets = ['emt4','librispeech','vctk', 'emth']
+	supported_datasets = ['emt4','librispeech','vctk', 'emth','jessa']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
@@ -55,6 +55,8 @@ def norm_data(args):
 		return ('')
 	elif args.dataset == 'emth':
 		return ('emotion')
+	elif args.dataset == 'jessa':
+		return ('Jessa')
 
 	# if args.dataset.startswith('LJSpeech'):
 	# 	return [os.path.join(args.base_dir, args.dataset)]
