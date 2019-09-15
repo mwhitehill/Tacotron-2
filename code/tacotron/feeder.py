@@ -106,6 +106,8 @@ class Feeder:
 		self._metadata_df['train_test'] = 'train'
 		self._metadata_df.iloc[np.array(sorted(test_indices))-1,-1] = 'test'
 		self.df_meta_train = self._metadata_df[self._metadata_df.loc[:,'train_test'] == 'train']
+		# self._metadata_df.to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\zo_jessa_train_test.csv', index=False,columns=columns+['train_test'])
+		# raise
 		# pd.DataFrame(self._train_meta).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test_meta\meta_train.csv')
 		# pd.DataFrame(self._test_meta).to_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\test_meta\meta_test.csv')
 
@@ -592,7 +594,7 @@ def test():
 	args.emt_attn = True
 	EVAL = True
 
-	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train_emt4_vctk_e40_v15.txt'
+	metadata_filename = 'C:/Users/t-mawhit/Documents/code/Tacotron-2/data/train_emt4_jessa.txt'
 	coord = tf.train.Coordinator()
 
 	# hparams.tacotron_num_gpus = 1

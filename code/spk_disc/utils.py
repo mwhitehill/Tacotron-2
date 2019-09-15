@@ -9,14 +9,14 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 if __name__ == '__main__':
-    import sys
-    sys.path.append(os.getcwd())
     import argparse
-    from hparams import hparams
+
+import sys
+sys.path.append(os.getcwd())
+from hparams import hparams
 
 config = get_config()
 TEST_SIZE =.05
-RANDOM_STATE = 0
 columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
 
 def keyword_spot(spec):
@@ -232,7 +232,8 @@ class Feeder:
         self._metadata_df.columns = columns
 
         indices = np.arange(len(self._metadata))
-        train_indices, test_indices = train_test_split(indices,test_size=TEST_SIZE,random_state=RANDOM_STATE)
+        train_indices, test_indices = train_test_split(indices,test_size=TEST_SIZE,
+                                                       random_state=self.hparams.tacotron_data_random_state)
 
         # Make sure test_indices is a multiple of batch_size else round down
         len_test_indices = self._round_down(len(test_indices), args.N * args.M)
@@ -255,6 +256,14 @@ class Feeder:
 
         self.total_emt = self._metadata_df.emt_label.unique()
         self.total_spk = self._metadata_df.spk_label.unique()
+
+        # num_samps = np.zeros(len(self.total_emt))
+        # self.class_weights = np.zeros(len(self.total_emt))
+        # if args.model_type == 'emt':
+        #     for e in self.total_emt:
+        #         print(len(self.df_meta_train.emt_label[self.df_meta_train.emt_label == e].index))
+        #         # num_samps[i] = self.df_meta_train.emt_label ==
+        #         raise
 
         if hparams.symmetric_mels:
             self._target_pad = -hparams.max_abs_value
@@ -384,6 +393,40 @@ class Feeder:
     def _pad_target(self, t, length):
         return np.pad(t, [(0, length - t.shape[0]), (0, 0)], mode='constant', constant_values=self._target_pad)
 
+def test_batch(data_path, df, args):
+
+    model_label = 'emt' if args.model_type == 'emt' else 'spk'
+
+    label_type = '{}_label'.format(model_label)
+    labels = df.loc[:,label_type].values
+    basenames = df.loc[:, 'basename'].values
+    filenames = [os.path.join(data_path,'mels',b) for b in basenames]
+    mels = [np.load(f) for f in filenames]
+    mels, max_len = _prepare_targets(mels, hparams.outputs_per_step)
+
+    meta = df.loc[:, columns_to_keep]
+
+    return(mels, meta, labels)
+
+def _prepare_targets(targets, alignment):
+    max_len = max([len(t) for t in targets])
+    data_len = _round_up(max_len, alignment)
+    return np.stack([_pad_target(t, data_len) for t in targets]), data_len
+
+def _round_down(x, multiple):
+    remainder = x % multiple
+    return x if remainder == 0 else x - remainder
+
+def _round_up(x, multiple):
+    remainder = x % multiple
+    return x if remainder == 0 else x + multiple - remainder
+
+def _pad_target(t, length):
+    _target_pad = -hparams.max_abs_value if hparams.symmetric_mels else 0.
+    return np.pad(t, [(0, length - t.shape[0]), (0, 0)], mode='constant', constant_values=_target_pad)
+
+
+
 # for check
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -401,14 +444,19 @@ if __name__ == "__main__":
     parser.add_argument('--restore', action='store_true', default=False,
                         help='whether to restore the model')
     args = parser.parse_args()
-    args.remove_long_samps = False  # True
+    args.remove_long_samps = True  # True
     args.test_max_len = False  # True
     args.TEST = True
     args.model_type = 'spk'
+    args.N=2
 
-    feeder = Feeder('../data/train_emt4_vctk_e40_v15.txt', args, hparams)
-    mels, meta, labels = feeder.random_batch(TEST=False, make_meta=True)
+    # feeder = Feeder('../data/train_emt4_jessa.txt', args, hparams)
+    # mels, meta, labels = feeder.random_batch_disc(TEST=False, make_meta=True)
     # print(meta)
+    DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\2019.09.14_18-21-43'
+    input_meta_path = os.path.join(DATA_PATH, 'meta.csv')
+    df = pd.read_csv(input_meta_path)
+    mels, meta, labels = test_batch(DATA_PATH,args)
     # print(mels.shape)
     print(labels)
     # w= tf.constant([1], dtype= tf.float32)

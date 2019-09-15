@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os
 import time
-from utils import Feeder, normalize, similarity, loss_cal, optim
+from utils import Feeder, normalize, similarity, loss_cal, optim, test_batch
 from configuration import get_config
 import sys
 sys.path.append(os.getcwd())
@@ -39,7 +39,7 @@ def train(path, args):
     # draw graph
     feeder = Feeder(args.train_filename, args, hparams)
 
-    output_classes = max([int(f) for f in feeder.total_emt]) if args.model_type in ['emt', 'accent'] else max([int(f) for f in feeder.total_spk])
+    output_classes = max([int(f) for f in feeder.total_emt])+1 if args.model_type in ['emt', 'accent'] else max([int(f) for f in feeder.total_spk])+1
 
     batch = tf.placeholder(shape= [args.N*args.M, None, config.n_mels], dtype=tf.float32)  # input batch (time x batch x n_mel)
     labels = tf.placeholder(shape=[args.N * args.M],dtype=tf.int32)
@@ -58,6 +58,7 @@ def train(path, args):
     if args.discriminator:
         logit = tf.layers.dense(embedded, output_classes)
         labels_one_hot = tf.one_hot(tf.to_int32(labels), output_classes)
+        # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
         acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1),predictions=tf.argmax(logit, 1))
     else:
@@ -125,7 +126,7 @@ def train(path, args):
             else:
                 batch_iter, _, labels_iter = feeder.random_batch()
             # run forward and backward propagation and update parameters
-            step, _, loss_cur, summary, acc_cur,lbls = sess.run([global_step, train_op, loss, merged, acc_op,labels],
+            step, _, loss_cur, summary, acc_cur,lbls, log = sess.run([global_step, train_op, loss, merged, acc_op,labels,logit],
                                   feed_dict={batch:batch_iter, labels:labels_iter, lr: config.lr*lr_factor})
 
             loss_window.append(loss_cur)
@@ -160,6 +161,63 @@ def train(path, args):
                     print("learning rate is decayed! current lr : ", config.lr * lr_factor)
             if step % config.save_checkpoint_iters == 0:
                 saver.save(sess, checkpoint_path, global_step=global_step)
+
+def test_disc(path_model, path_data, args):
+
+    input_meta_path = os.path.join(path_data, 'meta.csv')
+    df = pd.read_csv(input_meta_path)
+    n_samps = len(df.index)
+
+    tf.reset_default_graph()  # reset graph
+
+    # draw graph
+    feeder = Feeder(args.train_filename, args, hparams)
+
+    output_classes = max([int(f) for f in feeder.total_emt]) + 1 if args.model_type in ['emt', 'accent'] else max(
+        [int(f) for f in feeder.total_spk]) + 1
+
+    batch = tf.placeholder(shape=[n_samps, None, config.n_mels],
+                           dtype=tf.float32)  # input batch (time x batch x n_mel)
+    labels = tf.placeholder(shape=[n_samps], dtype=tf.int32)
+
+    # embedded = triple_lstm(batch)
+    print("Testing {} Discriminator Model".format(args.model_type))
+    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
+                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/reference_encoder',
+                               depth=hparams.reference_depth)  # [N, 128])
+    embedded = encoder(batch)
+
+
+    logit = tf.layers.dense(embedded, output_classes)
+    logit_sm = tf.nn.softmax(logit)
+    labels_one_hot = tf.one_hot(tf.to_int32(labels), output_classes)
+    # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit, labels=labels_one_hot))
+    acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1), predictions=tf.argmax(logit, 1))
+
+    saver = tf.train.Saver()
+
+    # training session
+    with tf.Session() as sess:
+        tf.local_variables_initializer().run()
+        tf.global_variables_initializer().run()
+
+        checkpoint_state = tf.train.get_checkpoint_state(path_model)
+        print('Loading checkpoint {}'.format(checkpoint_state.model_checkpoint_path))
+        saver.restore(sess, checkpoint_state.model_checkpoint_path)
+
+
+
+        batch_iter, _, labels_iter = test_batch(path_data, df, args)
+
+        # run forward and backward propagation and update parameters
+        loss_cur, acc_cur, lbls, log = sess.run(
+            [loss, acc_op, labels, logit_sm],
+            feed_dict={batch: batch_iter, labels: labels_iter})
+        print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur))
+        print(np.argmax(log,1))
+        print(lbls)
+
 
 def get_embeddings(path, args):
     tf.reset_default_graph()    # reset graph

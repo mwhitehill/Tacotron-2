@@ -146,6 +146,79 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 
 	return None
 
+def synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix):
+
+	n_emt = 4
+	n_txts_per_emotion = 5
+
+	synth_dir = os.path.join(output_dir, 'random', model_suffix, time_string())
+	os.makedirs(synth_dir, exist_ok=True)
+
+	synth = Synthesizer()
+	synth.load(args, checkpoint_path, hparams)
+
+	meta_save_path = os.path.join(synth_dir, 'meta.csv')
+
+	df = pd.read_csv(r'C:\Users\t-mawhit\Documents\code\Tacotron-2\data\zo_jessa_train_test.csv')
+	df_train = df[df.train_test == 'train']
+	df_test = df[df.train_test == 'test']
+
+	#synthesize 20 random samples from zo and jessa, 5 in each emotion
+	#change emotion
+
+	df_test_zo = df_test[df_test.dataset == 'emt4']
+	df_test_jessa = df_test[df_test.dataset == 'jessa']
+
+	np.random.seed(0)
+	chosen_texts_idxs = np.random.choice(df_test_jessa.index, n_txts_per_emotion * n_emt, replace=False)
+	df_test_jessa_texts_rows =df_test_jessa.loc[chosen_texts_idxs]
+	meta = df_test_jessa_texts_rows.copy()
+	meta['basename'] = ''
+	idx = 0
+
+	texts = []
+	mel_filenames = []
+	mel_ref_filenames_emt = []
+	mel_ref_filenames_spk = []
+	basenames = []
+	basenames_refs = []
+	emt_labels=[]
+	spk_labels=[]
+
+	for i in range(n_emt):
+		df_test_zo_emt = df_test_zo[df_test_zo.emt_label ==i]
+		for j in range(n_txts_per_emotion):
+			row = df_test_jessa_texts_rows.iloc[idx]
+			texts.append(row.text)
+			mel_filenames.append(os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename))
+
+			row_spk = df_test_jessa.loc[np.random.choice(df_test_jessa.index)]
+			mel_ref_filenames_spk.append(os.path.join(args.input_dir, row_spk.dataset, 'mels', row_spk.mel_filename))
+
+			row_emt = df_test_zo_emt.loc[np.random.choice(df_test_zo_emt.index)]
+			mel_ref_filenames_emt.append(os.path.join(args.input_dir, row_emt.dataset, 'mels', row_emt.mel_filename))
+
+			basename = '{}'.format(row.basename.split('.')[0])
+			basename_ref = 'e{}'.format(i)
+
+			basenames.append(basename)
+			basenames_refs.append(basename_ref)
+
+			emt_labels.append(int(row_emt.emt_label))
+			spk_labels.append(int(row_spk.spk_label))
+			meta.iloc[idx,8] = row_emt.emt_label
+			meta.iloc[idx,9] = row_spk.spk_label
+			meta.iloc[idx,10] = 'mel-{}_{}.npy'.format(basename,basename_ref)
+
+			idx+=1
+
+	meta.to_csv(meta_save_path,index=False)
+
+	print('Starting Synthesis on {} samples'.format(len(mel_filenames)))
+	synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames, basenames_refs=basenames_refs,
+									 mel_ref_filenames_emt=mel_ref_filenames_emt, mel_ref_filenames_spk=mel_ref_filenames_spk,
+									 emt_labels_synth=emt_labels, spk_labels_synth=spk_labels)
+
 def run_synthesis_multiple(args, checkpoint_path, output_dir, hparams, model_suffix):
 
 	n_spk_per_accent = 2
@@ -329,6 +402,8 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None, model_suffix=
 		return run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams)
 	elif args.mode == 'synthesis_multiple':
 		run_synthesis_multiple(args, checkpoint_path, output_dir, hparams, model_suffix)
+	elif args.mode == 'synthesis_random':
+		synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix)
 	elif args.mode == 'style_embs':
 		get_style_embeddings(args, checkpoint_path, output_dir, hparams)
 	else:
@@ -352,12 +427,12 @@ def test():
 	datasets = 'emt4_jessa' #'vc
 	# tk_accent' 'emt4_jessa'
 	# suffix = 'emt4'
-	model_suffix = 'emt4_style_tokens' #'vctk_accent_simp_gru_multi'#vctk_accent_baseline' #mh_emt_disc_l2'
-	args.mode =  'synthesis' #'synthesis_multiple' #'style_embs' #'synthesis'
+	model_suffix = 'emt4_jessa_baseline_2' #'emt4_jessa_baseline_2'#emt4_jessa_adapt_enc' #mh_emt_disc_l2'
+	args.mode =  'synthesis_random' #'synthesis_multiple' #'style_embs' #'synthesis' #'synthesis_random'
 	args.emt_attn=False#True
 	args.emt_ref_gru= 'none' #none' 'gru' 'gru_multi'
-	args.attn = 'sytle_tokens' #'simple' 'multihead'
-	args.emt_only = True#True
+	args.attn = 'style_tokens' #'simple' 'multihead'
+	args.emt_only = False#True
 	args.remove_long_samps = True#True
 	args.adain = False#True
 	args.flip_spk_emt = False#False
@@ -380,7 +455,7 @@ def test():
 	args.unpaired=False
 	args.input_dir = os.path.join(one_up_dir,'data')
 	args.output_dir = os.path.join(one_up_dir,'eval')
-	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test_vctk_accent.txt')#emt_attn.txt')
+	args.metadata_filename = os.path.join(one_up_dir, 'eval/eval_test_emt_attn.txt')#emt_attn.txt')
 	# args.train_filename = os.path.join(one_up_dir, 'data/train_{}{}.txt'.format(datasets,suffix))
 	args.train_filename = os.path.join(one_up_dir, 'data/train_{}.txt'.format(datasets))
 	hparams.tacotron_gst_concat = concat

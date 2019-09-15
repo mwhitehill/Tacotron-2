@@ -1,6 +1,6 @@
 import tensorflow as tf
 import os
-from model import train, test
+from model import train, test, test_disc
 from configuration import get_config
 import argparse
 import sys
@@ -31,12 +31,23 @@ if __name__ == "__main__":
     if args.model_type == 'emt':
         print("setting N to 4 for training emotions")
         args.N = 4
+    if args.model_type == 'spk' and 'emt4_jessa' in args.train_filename:
+        print("setting N to 2 and M to 10 for training Zo/Jessa speaker")
+        args.N = 2
+        args.M = 10
 
     # start testing
     if args.TEST:
         print("\nTest session")
-        if os.path.isdir(config.model_path,exist_ok=True):
-            test(config.model_path)
+        if args.model_type == 'emt':
+            MODEL_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_emt_disc'
+        else:
+            MODEL_PATH =r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_spk_disc'
+
+        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\2019.09.14_18-21-43'
+        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_adapt_enc\2019.09.14_19-04-25'
+        if os.path.isdir(MODEL_PATH):
+            test_disc(MODEL_PATH,DATA_PATH, args)
         else:
             raise AssertionError("model path doesn't exist!")
     # start training

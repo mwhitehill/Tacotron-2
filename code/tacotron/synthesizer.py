@@ -296,14 +296,15 @@ class Synthesizer:
 				speaker_id = '<no_g>'
 				speaker_ids.append(speaker_id)
 
-			# Write the spectrogram to disk
-			# Note: outputs mel-spectrogram files and target ones have same names, just different folders
-			mel_filename = os.path.join(out_dir, 'mel-{}_{}.npy'.format(basenames[i],basenames_refs[i]))
-			# np.save(mel_filename, mel, allow_pickle=False)
-			saved_mels_paths.append(mel_filename)
+
 			if log_dir is not None:
 				os.makedirs(os.path.join(log_dir,'wavs'),exist_ok=True)
 				os.makedirs(os.path.join(log_dir, 'plots'),exist_ok=True)
+				os.makedirs(os.path.join(log_dir, 'mels'), exist_ok=True)
+
+				mel_filename = os.path.join(out_dir, 'mels', 'mel-{}_{}.npy'.format(basenames[i], basenames_refs[i]))
+				np.save(mel_filename, mel, allow_pickle=False)
+
 				#save wav (mel -> wav)
 				if hparams.GL_on_GPU:
 					wav = self.session.run(self.GLGPU_mel_outputs, feed_dict={self.GLGPU_mel_inputs: mel})
