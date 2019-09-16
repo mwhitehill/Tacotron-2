@@ -152,6 +152,8 @@ def main():
 	parser.add_argument('--l2_spk_emb', action='store_true', default=False,help='feeds in the same references as paired for unpaired')
 	parser.add_argument('--flip_spk_emt', action='store_true', default=False,help='pass in emt as spk ref and vice versa - used for testing reversing the attention')
 	parser.add_argument('--adain', action='store_true', default=False,help='use adaptive image normalization on references')
+	parser.add_argument('--synth_constraint', action='store_true', default=False, help='use adaptive image normalization on references')
+
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']

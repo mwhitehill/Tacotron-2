@@ -44,8 +44,8 @@ if __name__ == "__main__":
         else:
             MODEL_PATH =r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_spk_disc'
 
-        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\2019.09.14_18-21-43'
-        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_adapt_enc\2019.09.14_19-04-25'
+        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\e40500_test'
+        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_adapt_enc\e32750_test'
         if os.path.isdir(MODEL_PATH):
             test_disc(MODEL_PATH,DATA_PATH, args)
         else:

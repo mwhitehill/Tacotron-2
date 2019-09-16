@@ -332,8 +332,18 @@ def train(log_dir, args, hparams):
 					disc_epochs = 300 if args.unpaired else 200
 					disc_epochs = 0 if args.TEST else disc_epochs
 					for i in range(disc_epochs+1):
-						d_loss_t, d_loss_p, d_loss_up, opt_n = sess.run([model.d_loss_targ, model.d_loss_p, model.d_loss_up, model.optimize_n])
-						message = 'step: {}, d_loss_t={:.5f}, d_loss_p ={:.5f}, d_loss_up ={:.5f}'.format(i, d_loss_t, d_loss_p, d_loss_up)
+						d_loss_t, d_loss_p, d_loss_up,\
+						d_loss_t_emt, d_loss_p_emt, d_loss_up_emt, \
+						d_loss_t_spk, d_loss_p_spk, d_loss_up_spk, \
+						opt_n = sess.run([model.d_loss_targ, model.d_loss_p, model.d_loss_up,
+																														 model.d_loss_targ_emt, model.d_loss_p_emt, model.d_loss_up_emt,
+																														 model.d_loss_targ_spk, model.d_loss_p_spk, model.d_loss_up_spk,
+																														 model.optimize_n])
+						message = 'step: {}, d_loss_t={:.5f}, d_loss_p ={:.5f}, d_loss_up ={:.5f},' \
+											' d_loss_t_emt={:.5f}, d_loss_p_emt ={:.5f}, d_loss_up_emt ={:.5f},' \
+											' d_loss_t_spk={:.5f}, d_loss_p_spk ={:.5f}, d_loss_up_spk ={:.5f}'.format(i, d_loss_t, d_loss_p, d_loss_up,
+																																															d_loss_t_emt, d_loss_p_emt, d_loss_up_emt,
+																																															d_loss_t_spk, d_loss_p_spk, d_loss_up_spk)
 						log(message, end='\r')
 					os.makedirs(r'nat_gan',exist_ok=True)
 					os.makedirs(r'nat_gan/pretrained_model', exist_ok=True)

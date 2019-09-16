@@ -138,7 +138,7 @@ hparams = tf.contrib.training.HParams(
 	#Tacotron
 	#Model general type
 	outputs_per_step = 1, #number of frames to generate at each decoding step (increase to speed up computation and allows for higher batch size, decreases G&L audio quality)
-	stop_at_any = True, #Determines whether the decoder should stop when predicting <stop> to any frame or to all of them (True works pretty well)
+	stop_at_any = False,#True, #Determines whether the decoder should stop when predicting <stop> to any frame or to all of them (True works pretty well)
 	batch_norm_position = 'after', #Can be in ('before', 'after'). Determines whether we use batch norm before or after the activation function (relu). Matter for debate.
 	clip_outputs = True, #Whether to clip spectrograms to T2_output_range (even in loss computation). ie: Don't penalize model for exceeding output range and bring back to borders.
 	lower_bound_decay = 0.1, #Small regularizer for noise synthesis by adding small range of penalty for silence regions. Set to 0 to clip in Tacotron range.
@@ -162,8 +162,8 @@ hparams = tf.contrib.training.HParams(
 	#Attention synthesis constraints
 	#"Monotonic" constraint forces the model to only look at the forwards attention_win_size steps.
 	#"Window" allows the model to look at attention_win_size neighbors, both forward and backward steps.
-	synthesis_constraint = False,  #Whether to use attention windows constraints in synthesis only (Useful for long utterances synthesis)
-	synthesis_constraint_type = 'window', #can be in ('window', 'monotonic'). 
+	synthesis_constraint = True,#False,  #Whether to use attention windows constraints in synthesis only (Useful for long utterances synthesis)
+	synthesis_constraint_type = 'window',#'window', #can be in ('window', 'monotonic').
 	attention_win_size = 7, #Side of the window. Current step does not count. If mode is window and attention_win_size is not pair, the 1 extra is provided to backward part of the window.
 
 	#Decoder

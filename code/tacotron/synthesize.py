@@ -427,7 +427,7 @@ def test():
 	datasets = 'emt4_jessa' #'vc
 	# tk_accent' 'emt4_jessa'
 	# suffix = 'emt4'
-	model_suffix = 'emt4_jessa_baseline_2' #'emt4_jessa_baseline_2'#emt4_jessa_adapt_enc' #mh_emt_disc_l2'
+	model_suffix = 'emt4_jessa_ae_retrain_window' #'emt4_jessa_baseline_2'#emt4_jessa_adapt_enc' #mh_emt_disc_l2'
 	args.mode =  'synthesis_random' #'synthesis_multiple' #'style_embs' #'synthesis' #'synthesis_random'
 	args.emt_attn=False#True
 	args.emt_ref_gru= 'none' #none' 'gru' 'gru_multi'
@@ -440,6 +440,7 @@ def test():
 	#MODEL SETTINGS
 	concat = True
 	args.tfr_up_only = False
+	args.synth_constraint=False
 
 	#EMBEDDING SETTINGS
 	args.n_spk = 5

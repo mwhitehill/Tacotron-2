@@ -11,6 +11,8 @@ from tacotron.models.multihead_attention import MultiheadAttention
 
 import numpy as np
 
+flipper = FlipGradientBuilder()
+
 def split_func(x, split_pos):
 	rst = []
 	start = 0
@@ -149,8 +151,14 @@ class Tacotron():
 		self.tower_style_emb_logit_spk = []
 		self.tower_nat_gan_logits_targets = []
 		self.tower_nat_gan_logits_mel_p = []
+		self.tower_nat_gan_logits_targets_emt = []
+		self.tower_nat_gan_logits_mel_p_emt = []
+		self.tower_nat_gan_logits_targets_spk = []
+		self.tower_nat_gan_logits_mel_p_spk= []
 		if use_unpaired:
 			self.tower_nat_gan_logits_mel_up = []
+			self.tower_nat_gan_logits_mel_up_emt = []
+			self.tower_nat_gan_logits_mel_up_spk = []
 
 		if use_unpaired:
 			self.tower_mel_outputs_up = []
@@ -294,9 +302,10 @@ class Tacotron():
 					#Attention Decoder Prenet
 					prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
 					#Attention Mechanism
-					attention_mechanism = LocationSensitiveAttention(hp.attention_dim, encoder_outputs, hparams=hp, is_training=is_training,
-						mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(input_len, [-1]), smoothing=hp.smoothing,
-						cumulate_weights=hp.cumulative_weights)
+					attention_mechanism = LocationSensitiveAttention(hp.attention_dim, encoder_outputs, hparams=hp,
+																													 is_training=not(args.synth_constraint),
+																													 mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(input_len, [-1]),
+																													 smoothing=hp.smoothing, cumulate_weights=hp.cumulative_weights)
 					#Decoder LSTM Cells
 					decoder_lstm = DecoderRNN(is_training, layers=hp.decoder_layers,
 						size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
@@ -375,7 +384,7 @@ class Tacotron():
 														scope='decoder_prenet')
 						# Attention Mechanism
 						attention_mechanism_up = LocationSensitiveAttention(hp.attention_dim, encoder_outputs_up, hparams=hp,
-																														 is_training=is_training,
+																														 is_training=not(args.synth_constraint),#is_training,
 																														 mask_encoder=hp.mask_encoder,
 																														 memory_sequence_length=tf.reshape(input_len, [-1]),
 																														 smoothing=hp.smoothing,
@@ -486,6 +495,8 @@ class Tacotron():
 																					 depth = hp.reference_depth)  # [N, 128])
 
 						nat_gan_disc = Style_Emb_Disc(3, scope='nat_gan_disc')
+						nat_gan_disc_emt = Style_Emb_Disc(n_emt, scope='nat_gan_disc_emt')
+						nat_gan_disc_spk = Style_Emb_Disc(n_spk, scope='nat_gan_disc_spk')
 
 						nat_gan_enc_out_targets = nat_gan_enc(tower_mel_targets[i]) # [N, 128]
 						nat_gan_enc_out_mel_p = nat_gan_enc(mel_outputs) # [N, 128]
@@ -493,9 +504,22 @@ class Tacotron():
 						nat_gan_logits_targets = nat_gan_disc(nat_gan_enc_out_targets)
 						nat_gan_logits_mel_p = nat_gan_disc(nat_gan_enc_out_mel_p)
 
+						nat_gan_enc_out_targets_flip = flipper(nat_gan_enc_out_targets)
+						nat_gan_enc_out_mel_p_flip = flipper(nat_gan_enc_out_mel_p)
+
+						nat_gan_logits_targets_emt = nat_gan_disc_emt(nat_gan_enc_out_targets_flip)
+						nat_gan_logits_mel_p_emt = nat_gan_disc_emt(nat_gan_enc_out_mel_p_flip)
+
+						nat_gan_logits_targets_spk = nat_gan_disc_spk(nat_gan_enc_out_targets_flip)
+						nat_gan_logits_mel_p_spk = nat_gan_disc_spk(nat_gan_enc_out_mel_p_flip)
+
 						if use_unpaired:
 							nat_gan_enc_out_mel_up = nat_gan_enc(mel_outputs_up)  # [N, 128]
 							nat_gan_logits_mel_up = nat_gan_disc(nat_gan_enc_out_mel_up)
+
+							nat_gan_enc_out_mel_up_flip = flipper(nat_gan_enc_out_mel_up)
+							nat_gan_logits_mel_up_emt = nat_gan_disc_emt(nat_gan_enc_out_mel_up_flip)
+							nat_gan_logits_mel_up_spk = nat_gan_disc_spk(nat_gan_enc_out_mel_up_flip)
 
 					#Grab alignments from the final decoder state
 					alignments = tf.transpose(final_decoder_state.alignment_history.stack(), [1, 2, 0])
@@ -515,8 +539,14 @@ class Tacotron():
 					if self.args.nat_gan:
 						self.tower_nat_gan_logits_targets.append(nat_gan_logits_targets)
 						self.tower_nat_gan_logits_mel_p.append(nat_gan_logits_mel_p)
+						self.tower_nat_gan_logits_targets_emt.append(nat_gan_logits_targets_emt)
+						self.tower_nat_gan_logits_mel_p_emt.append(nat_gan_logits_mel_p_emt)
+						self.tower_nat_gan_logits_targets_spk.append(nat_gan_logits_targets_spk)
+						self.tower_nat_gan_logits_mel_p_spk.append(nat_gan_logits_mel_p_spk)
 						if self.use_unpaired:
 							self.tower_nat_gan_logits_mel_up.append(nat_gan_logits_mel_up)
+							self.tower_nat_gan_logits_mel_up_emt.append(nat_gan_logits_mel_up_emt)
+							self.tower_nat_gan_logits_mel_up_spk.append(nat_gan_logits_mel_up_spk)
 
 					if use_unpaired and self._hparams.tacotron_use_style_emb_disc:
 						self.tower_style_emb_logit_up_emt.append(style_emb_logit_up_emt)
@@ -620,6 +650,12 @@ class Tacotron():
 			self.tower_d_loss_targ = []
 			self.tower_d_loss_p = []
 			self.tower_d_loss_up = []
+			self.tower_d_loss_targ_emt = []
+			self.tower_d_loss_p_emt = []
+			self.tower_d_loss_up_emt = []
+			self.tower_d_loss_targ_spk = []
+			self.tower_d_loss_p_spk = []
+			self.tower_d_loss_up_spk = []
 
 		self.tower_g_loss_p = []
 		self.tower_g_loss_up = []
@@ -643,6 +679,12 @@ class Tacotron():
 			total_d_loss_targ = 0
 			total_d_loss_p = 0
 			total_d_loss_up = 0
+			total_d_loss_targ_emt = 0
+			total_d_loss_p_emt = 0
+			total_d_loss_up_emt = 0
+			total_d_loss_targ_spk = 0
+			total_d_loss_p_spk = 0
+			total_d_loss_up_spk = 0
 		total_g_loss_p = 0
 		total_g_loss_up = 0
 
@@ -726,6 +768,11 @@ class Tacotron():
 					else:
 						style_emb_orthog_loss = tf.constant(0.)
 
+					# #alignment loss
+					# g = tf.constant(.2)
+					# Wnt = 1 - tf.exp(-tf.pow((n/N) - (t/T), 2) / tf.pow(2*g, 2))
+					# alignment = alg
+
 					# Compute the regularization weight
 					if hp.tacotron_scale_regularization:
 						reg_weight_scaler = 1. / (2 * hp.max_abs_value) if hp.symmetric_mels else 1. / (hp.max_abs_value)
@@ -745,10 +792,25 @@ class Tacotron():
 						d_loss_p = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_p[i], labels=tf.one_hot(tf.constant(1, shape=[self.batch_size_int]),3)))
 						d_loss_up = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_up[i], labels=tf.one_hot(tf.constant(2, shape=[self.batch_size_int]),3))) if self.use_unpaired else tf.constant(0.)
 
+						d_loss_adv_derate = tf.constant(.1)
+						emt_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_emt_labels[i]), self.n_emt)
+						spk_labels_one_hot = tf.one_hot(tf.to_int32(self.tower_spk_labels[i]), self.n_spk)
+						d_loss_targ_emt = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_targets_emt[i],labels=emt_labels_one_hot))
+						d_loss_p_emt = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_p_emt[i], labels=emt_labels_one_hot))
+						d_loss_targ_spk = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_targets_spk[i],labels=spk_labels_one_hot))
+						d_loss_p_spk = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_p_spk[i],labels=spk_labels_one_hot))
+
+						if self.use_unpaired:
+							emt_labels_one_hot_up = tf.one_hot(tf.to_int32(self.tower_emt_up_labels[i]), self.n_emt)
+							spk_labels_one_hot_up = tf.one_hot(tf.to_int32(self.tower_spk_up_labels[i]), self.n_spk)
+
+						d_loss_up_emt = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_up_emt[i],labels=emt_labels_one_hot_up)) if self.use_unpaired else tf.constant(0.)
+						d_loss_up_spk = d_loss_adv_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_up_spk[i],labels=spk_labels_one_hot_up)) if self.use_unpaired else tf.constant(0.)
+
 						g_loss_p = self.args.nat_gan_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_p[i],labels=tf.one_hot(tf.constant(0, shape=[self.batch_size_int]),3)))
 						g_loss_up = self.args.nat_gan_derate * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.tower_nat_gan_logits_mel_up[i],labels=tf.one_hot(tf.constant(0, shape=[self.batch_size_int]),3))) if self.use_unpaired else tf.constant(0.)
 
-						d_loss = d_loss_targ + d_loss_p + d_loss_up
+						d_loss = d_loss_targ + d_loss_p + d_loss_up + d_loss_targ_emt + d_loss_p_emt + d_loss_up_emt + d_loss_targ_spk + d_loss_p_spk + d_loss_up_spk
 						g_loss = g_loss_p + g_loss_up
 					else:
 						g_loss_p = tf.constant(0.)
@@ -775,6 +837,12 @@ class Tacotron():
 						self.tower_d_loss_targ.append(d_loss_targ)
 						self.tower_d_loss_p.append(d_loss_p)
 						self.tower_d_loss_up.append(d_loss_up)
+						self.tower_d_loss_targ_emt.append(d_loss_targ_emt)
+						self.tower_d_loss_p_emt.append(d_loss_p_emt)
+						self.tower_d_loss_up_emt.append(d_loss_up_emt)
+						self.tower_d_loss_targ_spk.append(d_loss_targ_spk)
+						self.tower_d_loss_p_spk.append(d_loss_p_spk)
+						self.tower_d_loss_up_spk.append(d_loss_up_spk)
 					self.tower_g_loss_p.append(g_loss_p)
 					self.tower_g_loss_up.append(g_loss_up)
 
@@ -807,6 +875,12 @@ class Tacotron():
 				total_d_loss_targ+=d_loss_targ
 				total_d_loss_p+=d_loss_p
 				total_d_loss_up+=d_loss_up
+				total_d_loss_targ_emt+=d_loss_targ_emt
+				total_d_loss_p_emt+=d_loss_p_emt
+				total_d_loss_up_emt+=d_loss_up_emt
+				total_d_loss_targ_spk+=d_loss_targ_spk
+				total_d_loss_p_spk+=d_loss_p_spk
+				total_d_loss_up_spk+=d_loss_up_spk
 			total_g_loss_p+=g_loss_p
 			total_g_loss_up+=g_loss_up
 
@@ -835,6 +909,12 @@ class Tacotron():
 			self.d_loss_targ = total_d_loss_targ / hp.tacotron_num_gpus
 			self.d_loss_p = total_d_loss_p / hp.tacotron_num_gpus
 			self.d_loss_up = total_d_loss_up / hp.tacotron_num_gpus
+			self.d_loss_targ_emt = total_d_loss_targ_emt / hp.tacotron_num_gpus
+			self.d_loss_p_emt = total_d_loss_p_emt / hp.tacotron_num_gpus
+			self.d_loss_up_emt = total_d_loss_up_emt / hp.tacotron_num_gpus
+			self.d_loss_targ_spk = total_d_loss_targ_spk / hp.tacotron_num_gpus
+			self.d_loss_p_spk = total_d_loss_p_spk / hp.tacotron_num_gpus
+			self.d_loss_up_spk = total_d_loss_up_spk / hp.tacotron_num_gpus
 		self.g_loss_p = total_g_loss_p / hp.tacotron_num_gpus
 		self.g_loss_up = total_g_loss_up / hp.tacotron_num_gpus
 
