@@ -8,7 +8,7 @@ from hparams import hparams
 from infolog import log
 from tacotron.synthesize import tacotron_synthesize
 from tacotron.train import tacotron_train
-from wavenet_vocoder.train import wavenet_train
+# from wavenet_vocoder.train import wavenet_train
 
 log = infolog.log
 
@@ -79,11 +79,12 @@ def train(args, log_dir, hparams):
 		log('\n#############################################################\n')
 		log('Wavenet Train\n')
 		log('###########################################################\n')
-		checkpoint = wavenet_train(args, log_dir, hparams, input_path)
-		if checkpoint is None:
-			raise ('Error occured while training Wavenet, Exiting!')
-		wave_state = 1
-		save_seq(state_file, [taco_state, GTA_state, wave_state], input_path)
+		raise("not using wavent right now")
+		# checkpoint = wavenet_train(args, log_dir, hparams, input_path)
+		# if checkpoint is None:
+		# 	raise ('Error occured while training Wavenet, Exiting!')
+		# wave_state = 1
+		# save_seq(state_file, [taco_state, GTA_state, wave_state], input_path)
 
 	if wave_state and GTA_state and taco_state:
 		log('TRAINING IS ALREADY COMPLETE!!')
@@ -93,7 +94,7 @@ def main():
 	parser.add_argument('--base_dir', default='')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--tacotron_input', default='../data/train_emt4_vctk_e40_v15.txt')
+	parser.add_argument('--tacotron_input', default='../data/train_emt4_jessa.txt')
 	parser.add_argument('--wavenet_input', default='tacotron_output/gta/map.txt')
 	parser.add_argument('--name', help='Name of logging directory.')
 	parser.add_argument('--model', default='Tacotron-2')
@@ -106,9 +107,9 @@ def main():
 		help='Steps between running summary ops')
 	parser.add_argument('--embedding_interval', type=int, default=1000000,
 		help='Steps between updating embeddings projection visualization')
-	parser.add_argument('--checkpoint_interval', type=int, default=500,
+	parser.add_argument('--checkpoint_interval', type=int, default=250,
 		help='Steps between writing checkpoints')
-	parser.add_argument('--eval_interval', type=int, default=40,
+	parser.add_argument('--eval_interval', type=int, default=20,
 		help='Steps between eval on test data')
 	parser.add_argument('--tacotron_train_steps', type=int, default=1000000, help='total number of tacotron training steps')
 	parser.add_argument('--wavenet_train_steps', type=int, default=500000, help='total number of wavenet training steps')
@@ -139,7 +140,7 @@ def main():
 	parser.add_argument('--save_output_vars', action='store_true', default=False, help='saves csvs of output vars')
 	parser.add_argument('--opt_ref_no_mo', action='store_true', default=False, help='dont train encoders based on synthesized samples style embeddings')
 	parser.add_argument('--restart_optimizer_r', action='store_true', default=False, help='retrains the reference encoder optimizer')
-	parser.add_argument('--pretrained_emt_disc', action='store_true', default=False, help='whether to use pretrained emt disc')
+	parser.add_argument('--pretrained_emb_disc', action='store_true', default=False, help='whether to use pretrained emt disc')
 	parser.add_argument('--no_general', action='store_true', default=False, help='mel output loss is not being classified as general')
 	parser.add_argument('--restore_std', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
 	parser.add_argument('--emt_attn', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
@@ -153,7 +154,7 @@ def main():
 	parser.add_argument('--flip_spk_emt', action='store_true', default=False,help='pass in emt as spk ref and vice versa - used for testing reversing the attention')
 	parser.add_argument('--adain', action='store_true', default=False,help='use adaptive image normalization on references')
 	parser.add_argument('--synth_constraint', action='store_true', default=False, help='use adaptive image normalization on references')
-
+	parser.add_argument('--adv_emb_disc', action='store_true', default=False,help='use adversarial training on style embeddings')
 	args = parser.parse_args()
 
 	accepted_models = ['Tacotron', 'WaveNet', 'Tacotron-2']

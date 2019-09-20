@@ -20,13 +20,12 @@ if __name__ == "__main__":
                         help='Will create batches with the longest samples first to test max batch size')
     parser.add_argument('--TEST', action='store_true', default=False,
                         help='Uses small groups of batches to make testing faster')
-    parser.add_argument('--train_filename', default='../data/train_emt4_vctk_e40_v15.txt')
+    parser.add_argument('--train_filename', default='../data/train_emt4_jessa.txt')
     parser.add_argument('--model_type', default='emt', help='Options = emt or spk')
     parser.add_argument('--time_string', default=None, help='time string of previous saved model')
     parser.add_argument('--restore', action='store_true', default=False,
                         help='whether to restore the model')
     parser.add_argument('--discriminator', action='store_true', default=False,help='whether to use a discriminator as loss')
-    parser.add_argument('--output_classes', type=int, default=5, help='# classes for discriminator')
     args = parser.parse_args()
     if args.model_type == 'emt':
         print("setting N to 4 for training emotions")
@@ -44,8 +43,8 @@ if __name__ == "__main__":
         else:
             MODEL_PATH =r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_spk_disc'
 
-        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\e40500_test'
-        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_adapt_enc\e32750_test'
+        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\paired'#e40500_test_rs2_20samps'
+        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'
         if os.path.isdir(MODEL_PATH):
             test_disc(MODEL_PATH,DATA_PATH, args)
         else:

@@ -146,10 +146,11 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 
 	return None
 
-def synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix):
+def synthesize_random(args, checkpoint_path, output_dir,
+											hparams, model_suffix):
 
-	n_emt = 4
-	n_txts_per_emotion = 5
+	n_emt = 4 if not(args.paired) else 1
+	n_txts_per_emotion = 5 if not(args.paired) else 10
 
 	synth_dir = os.path.join(output_dir, 'random', model_suffix, time_string())
 	os.makedirs(synth_dir, exist_ok=True)
@@ -169,10 +170,12 @@ def synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix):
 	df_test_zo = df_test[df_test.dataset == 'emt4']
 	df_test_jessa = df_test[df_test.dataset == 'jessa']
 
-	np.random.seed(0)
-	chosen_texts_idxs = np.random.choice(df_test_jessa.index, n_txts_per_emotion * n_emt, replace=False)
-	df_test_jessa_texts_rows =df_test_jessa.loc[chosen_texts_idxs]
-	meta = df_test_jessa_texts_rows.copy()
+	df_test_use = df_test_jessa if not(args.zo) else df_test_zo[df_test_zo.emt_label==0]
+
+	np.random.seed(2)
+	chosen_texts_idxs = np.random.choice(df_test_use.index, n_txts_per_emotion * n_emt, replace=False)
+	df_test_use_texts_rows =df_test_use.loc[chosen_texts_idxs]
+	meta = df_test_use_texts_rows.copy()
 	meta['basename'] = ''
 	idx = 0
 
@@ -188,15 +191,19 @@ def synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix):
 	for i in range(n_emt):
 		df_test_zo_emt = df_test_zo[df_test_zo.emt_label ==i]
 		for j in range(n_txts_per_emotion):
-			row = df_test_jessa_texts_rows.iloc[idx]
+			row = df_test_use_texts_rows.iloc[idx]
 			texts.append(row.text)
 			mel_filenames.append(os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename))
 
-			row_spk = df_test_jessa.loc[np.random.choice(df_test_jessa.index)]
-			mel_ref_filenames_spk.append(os.path.join(args.input_dir, row_spk.dataset, 'mels', row_spk.mel_filename))
+			if args.paired:
+				mel_ref_filenames_spk.append(os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename))
+				mel_ref_filenames_emt.append(os.path.join(args.input_dir, row.dataset, 'mels', row.mel_filename))
+			else:
+				row_spk = df_test_use.loc[np.random.choice(df_test_use.index)]
+				mel_ref_filenames_spk.append(os.path.join(args.input_dir, row_spk.dataset, 'mels', row_spk.mel_filename))
 
-			row_emt = df_test_zo_emt.loc[np.random.choice(df_test_zo_emt.index)]
-			mel_ref_filenames_emt.append(os.path.join(args.input_dir, row_emt.dataset, 'mels', row_emt.mel_filename))
+				row_emt = df_test_zo_emt.loc[np.random.choice(df_test_zo_emt.index)]
+				mel_ref_filenames_emt.append(os.path.join(args.input_dir, row_emt.dataset, 'mels', row_emt.mel_filename))
 
 			basename = '{}'.format(row.basename.split('.')[0])
 			basename_ref = 'e{}'.format(i)
@@ -204,10 +211,12 @@ def synthesize_random(args, checkpoint_path, output_dir, hparams, model_suffix):
 			basenames.append(basename)
 			basenames_refs.append(basename_ref)
 
-			emt_labels.append(int(row_emt.emt_label))
-			spk_labels.append(int(row_spk.spk_label))
-			meta.iloc[idx,8] = row_emt.emt_label
-			meta.iloc[idx,9] = row_spk.spk_label
+			emt_label = row_emt.emt_label if not(args.paired) else row.emt_label
+			spk_label = row_spk.spk_label if not(args.paired) else row.spk_label
+			emt_labels.append(int(emt_label))
+			spk_labels.append(int(spk_label))
+			meta.iloc[idx,8] = emt_label
+			meta.iloc[idx,9] = spk_label
 			meta.iloc[idx,10] = 'mel-{}_{}.npy'.format(basename,basename_ref)
 
 			idx+=1
@@ -427,20 +436,25 @@ def test():
 	datasets = 'emt4_jessa' #'vc
 	# tk_accent' 'emt4_jessa'
 	# suffix = 'emt4'
-	model_suffix = 'emt4_jessa_ae_retrain_window' #'emt4_jessa_baseline_2'#emt4_jessa_adapt_enc' #mh_emt_disc_l2'
+	model_suffix = 'ej_ae_emb_disc_adv_retrain_ng' #'emt4_jessa_baseline_2'#ej_ae_emb_disc_adv' #mh_emt_disc_l2'
 	args.mode =  'synthesis_random' #'synthesis_multiple' #'style_embs' #'synthesis' #'synthesis_random'
-	args.emt_attn=False#True
-	args.emt_ref_gru= 'none' #none' 'gru' 'gru_multi'
-	args.attn = 'style_tokens' #'simple' 'multihead'
-	args.emt_only = False#True
-	args.remove_long_samps = True#True
-	args.adain = False#True
-	args.flip_spk_emt = False#False
+	args.paired = False#True
+	args.zo = False#True
 
 	#MODEL SETTINGS
 	concat = True
+	args.emt_only = False#True
+	args.remove_long_samps = True#True
 	args.tfr_up_only = False
-	args.synth_constraint=False
+	args.synth_constraint=True
+	args.adv_emb_disc = False
+
+	#Other Settings
+	args.emt_attn=False#True
+	args.emt_ref_gru= 'none' #none' 'gru' 'gru_multi'
+	args.attn = 'style_tokens' #'simple' 'multihead'
+	args.adain = False#True
+	args.flip_spk_emt = False#False
 
 	#EMBEDDING SETTINGS
 	args.n_spk = 5

@@ -52,11 +52,11 @@ def train(path, args):
     print("Training {} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
                                strides=(2, 2),
-                               is_training=True, scope='Tacotron_model/inference/reference_encoder', depth=hparams.reference_depth)  # [N, 128])
+                               is_training=True, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type), depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
 
     if args.discriminator:
-        logit = tf.layers.dense(embedded, output_classes)
+        logit = tf.layers.dense(embedded, output_classes, name='Tacotron_model/inference/pretrained_ref_enc_{}_dense'.format(args.model_type))
         labels_one_hot = tf.one_hot(tf.to_int32(labels), output_classes)
         # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
@@ -120,13 +120,14 @@ def train(path, args):
         writer = tf.summary.FileWriter(logs_folder, sess.graph)
         lr_factor = 1   # lr decay factor ( 1/2 per 10000 iteration)
 
-        for iter in range(config.iteration):
+        iterations = 30000 if args.model_type == 'emt' else config.iteration
+        for iter in range(iterations):
             if args.discriminator:
                 batch_iter, _, labels_iter = feeder.random_batch_disc()
             else:
                 batch_iter, _, labels_iter = feeder.random_batch()
             # run forward and backward propagation and update parameters
-            step, _, loss_cur, summary, acc_cur,lbls, log = sess.run([global_step, train_op, loss, merged, acc_op,labels,logit],
+            step, _, loss_cur, summary, acc_cur = sess.run([global_step, train_op, loss, merged, acc_op],
                                   feed_dict={batch:batch_iter, labels:labels_iter, lr: config.lr*lr_factor})
 
             loss_window.append(loss_cur)
@@ -183,12 +184,12 @@ def test_disc(path_model, path_data, args):
     # embedded = triple_lstm(batch)
     print("Testing {} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
-                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/reference_encoder',
+                               strides=(2, 2), is_training=False, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type),
                                depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
 
 
-    logit = tf.layers.dense(embedded, output_classes)
+    logit = tf.layers.dense(embedded, output_classes,name='Tacotron_model/inference/pretrained_ref_enc_{}_dense'.format(args.model_type))
     logit_sm = tf.nn.softmax(logit)
     labels_one_hot = tf.one_hot(tf.to_int32(labels), output_classes)
     # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
@@ -211,13 +212,20 @@ def test_disc(path_model, path_data, args):
         batch_iter, _, labels_iter = test_batch(path_data, df, args)
 
         # run forward and backward propagation and update parameters
-        loss_cur, acc_cur, lbls, log = sess.run(
-            [loss, acc_op, labels, logit_sm],
+        loss_cur, acc_cur, lbls, log, emb = sess.run(
+            [loss, acc_op, labels, logit_sm, embedded],
             feed_dict={batch: batch_iter, labels: labels_iter})
         print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur))
         print(np.argmax(log,1))
         print(lbls)
-
+        emb_path = os.path.join(path_data, 'emb.csv')
+        emb_meta_path = os.path.join(path_data, 'emb_meta.csv')
+        pd.DataFrame(emb).to_csv(emb_path,sep='\t',index=False,header=False)
+        columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
+        df = df.loc[:, columns_to_keep]
+        paired_label = 'paired' if 'paired' in path_data else 'unpaired'
+        df['paired'] = paired_label
+        df.to_csv(emb_meta_path,sep='\t',index=False)
 
 def get_embeddings(path, args):
     tf.reset_default_graph()    # reset graph
@@ -243,7 +251,7 @@ def get_embeddings(path, args):
     # embedded = triple_lstm(batch)
     print("{} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
-                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/reference_encoder',
+                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type),
                                depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
 

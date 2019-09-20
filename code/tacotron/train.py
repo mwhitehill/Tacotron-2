@@ -239,13 +239,14 @@ def train(log_dir, args, hparams):
 	assert(not(args.restart_nat_gan_d and args.restore_nat_gan_d_sep))
 
 	var_list = tf.global_variables()
-	var_list = [v for v in var_list if not ('reference_encoder' in v.name)]
+	var_list = [v for v in var_list if not ('pretrained' in v.name)]
 	var_list = [v for v in var_list if not ('nat_gan' in v.name or 'optimizer_n' in v.name)] if (args.restart_nat_gan_d or args.restore_nat_gan_d_sep) else var_list
 	var_list = [v for v in var_list if not ('optimizer_r' in v.name or 'optimizer_3' in v.name)] if args.restart_optimizer_r else var_list
 	saver_restore = tf.train.Saver(var_list=var_list)
 
-	if args.emt_attn and args.unpaired and args.pretrained_emt_disc:
-		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('reference_encoder' in v.name)])
+	if args.unpaired and args.pretrained_emb_disc:
+		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_emt' in v.name)])
+		saver_restore_spk_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_spk' in v.name)])
 
 	if args.nat_gan:
 		saver_nat_gan = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('nat_gan' in v.name or 'optimizer_n' in v.name)])
@@ -287,11 +288,16 @@ def train(log_dir, args, hparams):
 				log('Starting new training!', slack=True)
 				saver.save(sess, checkpoint_path, global_step=global_step)
 
-			if args.emt_attn and args.unpaired and args.pretrained_emt_disc:
-				save_dir_emt = r'spk_disc/pretrained_model'
+			if args.unpaired and args.pretrained_emb_disc:
+				save_dir_emt = r'spk_disc/pretrained_model_emt_disc'
 				checkpoint_state_emt = tf.train.get_checkpoint_state(save_dir_emt)
 				saver_restore_emt_disc.restore(sess, checkpoint_state_emt.model_checkpoint_path)
 				log('Loaded Emotion Discriminator from checkpoint {}'.format(checkpoint_state_emt.model_checkpoint_path), slack=True)
+
+				save_dir_spk = r'spk_disc/pretrained_model_spk_disc'
+				checkpoint_state_spk = tf.train.get_checkpoint_state(save_dir_spk)
+				saver_restore_spk_disc.restore(sess, checkpoint_state_spk.model_checkpoint_path)
+				log('Loaded Speaker Discriminator from checkpoint {}'.format(checkpoint_state_spk.model_checkpoint_path), slack=True)
 
 			if args.nat_gan and args.restore_nat_gan_d_sep:
 				checkpoint_state_nat_gan = tf.train.get_checkpoint_state(save_dir_nat_gan)

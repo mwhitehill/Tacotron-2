@@ -280,6 +280,8 @@ class Feeder:
             # df = df[df['dataset'].isin(['emt4', 'emth'])]
             model_label = 'emt'
         elif self.args.model_type == 'spk':
+            #only use general emotion for speaker model
+            df = df[df['emt_label'] == '0']
             labels = np.random.choice(self.total_spk, self.args.N, replace=False)
             model_label = 'spk'
         elif self.args.model_type == 'accent':
