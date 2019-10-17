@@ -280,7 +280,7 @@ def train(log_dir, args, hparams):
 	if args.unpaired and args.pretrained_emb_disc:
 		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_emt' in v.name)])
 		saver_restore_spk_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_spk' in v.name)])
-	elif args.pretrained_emb_disc_all:
+	elif args.unpaired and args.pretrained_emb_disc_all:
 		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('refnet_emt' in v.name)])
 		saver_restore_spk_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('refnet_spk' in v.name)])
 
@@ -328,7 +328,7 @@ def train(log_dir, args, hparams):
 				log('Starting new training!', slack=True)
 				saver.save(sess, checkpoint_path, global_step=global_step)
 
-			if args.unpaired and args.pretrained_emb_disc:
+			if args.unpaired and (args.pretrained_emb_disc or args.pretrained_emb_disc_all):
 				save_dir_emt = r'spk_disc/pretrained_model_emt_disc'
 				checkpoint_state_emt = tf.train.get_checkpoint_state(save_dir_emt)
 				saver_restore_emt_disc.restore(sess, checkpoint_state_emt.model_checkpoint_path)
