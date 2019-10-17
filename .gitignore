@@ -10,3 +10,5 @@ logs
 archive
 .gitconfig
 eval
+plots
+wavs

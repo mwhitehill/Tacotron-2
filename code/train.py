@@ -165,7 +165,7 @@ def main():
 
 	log_dir, hparams = prepare_run(args)
 
-	synth_metadata_filename = r"synth_emt4.txt"
+	synth_metadata_filename = r"synth_emt4_jessa.txt"
 	args.synth_metadata_filename = os.path.join(r"../data", synth_metadata_filename)
 	import socket
 	if socket.gethostname() in ['A3907623','MININT-39T168F']:
