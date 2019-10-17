@@ -50,10 +50,10 @@ def train(path, args):
 
     # embedded = triple_lstm(batch)
     print("Training {} Discriminator Model".format(args.model_type))
-    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
-                               strides=(2, 2),
+    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3), strides=(2, 2),
                                is_training=True, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type), depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
+    embedded = normalize(embedded)
 
     if args.discriminator:
         logit = tf.layers.dense(embedded, output_classes, name='Tacotron_model/inference/pretrained_ref_enc_{}_dense'.format(args.model_type))
@@ -152,10 +152,10 @@ def train(path, args):
                 if lr_changed:
                     print("learning rate is decayed! current lr : ", config.lr * lr_factor)
             elif args.model_type == 'spk':
-                if step > 4000:
+                if step > 300:#4000:
                     lr_changed = True if lr_factor != .01 else False
                     lr_factor = .01
-                elif step > 2500:
+                elif step > 180:#2500:
                     lr_changed = True if lr_factor != .1 else False
                     lr_factor = .1
                 if lr_changed:

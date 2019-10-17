@@ -141,6 +141,7 @@ def main():
 	parser.add_argument('--opt_ref_no_mo', action='store_true', default=False, help='dont train encoders based on synthesized samples style embeddings')
 	parser.add_argument('--restart_optimizer_r', action='store_true', default=False, help='retrains the reference encoder optimizer')
 	parser.add_argument('--pretrained_emb_disc', action='store_true', default=False, help='whether to use pretrained emt disc')
+	parser.add_argument('--pretrained_emb_disc_all', action='store_true', default=False,help='use pretrained emb disc on references and unpaired')
 	parser.add_argument('--no_general', action='store_true', default=False, help='mel output loss is not being classified as general')
 	parser.add_argument('--restore_std', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
 	parser.add_argument('--emt_attn', action='store_true', default=False,help='allows the restoring of a model without optimzer_r to a new model with optimizer_r')
@@ -164,10 +165,19 @@ def main():
 
 	log_dir, hparams = prepare_run(args)
 
+	synth_metadata_filename = r"synth_emt4.txt"
+	args.synth_metadata_filename = os.path.join(r"../data", synth_metadata_filename)
 	import socket
 	if socket.gethostname() in ['A3907623','MININT-39T168F']:
 		hparams.tacotron_num_gpus = 1
 		hparams.tacotron_batch_size = 32
+	elif socket.gethostname() == 'area51.cs.washington.edu':
+		hparams.tacotron_num_gpus = 2
+		hparams.tacotron_batch_size = 64
+		os.environ["CUDA_VISIBLE_DEVICES"]="1,2"
+		args.input_dir = '/data/tts_emotion'
+		args.synth_metadata_filename = os.path.join(r"/data/tts_emotion",synth_metadata_filename)
+		print("over-riding input directory for running on Area51")
 
 	if hparams.tacotron_fine_tuning and not(args.restore):
 		raise ValueError('fine_tuning set to true but not restoring the model!')

@@ -25,11 +25,9 @@ log = infolog.log
 def time_string():
 	return datetime.now().strftime('%Y-%m-%d %H:%M')
 
-def get_eval_feed_dict(hparams, eval_model, input_dir, flip_spk_emt):
-
+def get_eval_feed_dict(hparams, synth_metadata_filename, eval_model, input_dir, flip_spk_emt):
 
 	#eval synthesis data
-	synth_metadata_filename = r"../data/synth_emt4.txt"
 	texts, basenames, basenames_refs, mel_filenames, \
 	mel_ref_filenames_emt, mel_ref_filenames_spk, \
 	emt_labels, spk_labels = get_filenames_from_metadata(synth_metadata_filename,
@@ -156,7 +154,8 @@ def model_test_mode(args, hparams, train_model): #feeder,global_step):
 
 
 		model.initialize(args, model.synth_inputs, model.synth_input_lengths, split_infos=model.synth_split_infos,
-						 ref_mel_emt=model.synth_mel_refs_emt, ref_mel_spk=model.synth_mel_refs_spk, n_emt=train_model.n_emt, n_spk=1)
+						 ref_mel_emt=model.synth_mel_refs_emt, ref_mel_spk=model.synth_mel_refs_spk,
+						 n_emt=train_model.n_emt, n_spk=train_model.n_spk)
 
 		# model.add_loss()
 
@@ -281,6 +280,9 @@ def train(log_dir, args, hparams):
 	if args.unpaired and args.pretrained_emb_disc:
 		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_emt' in v.name)])
 		saver_restore_spk_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('pretrained_ref_enc_spk' in v.name)])
+	elif args.pretrained_emb_disc_all:
+		saver_restore_emt_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('refnet_emt' in v.name)])
+		saver_restore_spk_disc = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('refnet_spk' in v.name)])
 
 	if args.nat_gan:
 		saver_nat_gan = tf.train.Saver(var_list=[v for v in tf.global_variables() if ('nat_gan' in v.name or 'optimizer_n' in v.name)])
@@ -296,8 +298,8 @@ def train(log_dir, args, hparams):
 	config.allow_soft_placement = True
 
 	eval_feed_dict, emt_labels, spk_labels, \
-	basenames, basenames_refs = get_eval_feed_dict(hparams, eval_model,
-												   args.input_dir, args.flip_spk_emt)
+	basenames, basenames_refs = get_eval_feed_dict(hparams, args.synth_metadata_filename,
+												   eval_model, args.input_dir, args.flip_spk_emt)
 
 	#Train
 	with tf.Session(config=config) as sess:

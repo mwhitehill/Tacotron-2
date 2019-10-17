@@ -14,6 +14,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--N', type=int, default=4, help='Number groups')
     parser.add_argument('--M', type=int, default=5, help='Number utterances per group')
+    parser.add_argument('--gpu', type=str, default='0', help='gpu number to use')
     parser.add_argument('--remove_long_samps', action='store_true', default=False,
                         help='Will remove out the longest samples from EMT4/VCTK')
     parser.add_argument('--test_max_len', action='store_true', default=False,
@@ -34,6 +35,10 @@ if __name__ == "__main__":
         print("setting N to 2 and M to 10 for training Zo/Jessa speaker")
         args.N = 2
         args.M = 10
+
+    import socket
+    if socket.gethostname() == 'area51.cs.washington.edu':
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     # start testing
     if args.TEST:
