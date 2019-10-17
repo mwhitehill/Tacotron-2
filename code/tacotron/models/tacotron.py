@@ -29,7 +29,7 @@ class Tacotron():
 		self._hparams = hparams
 
 	def initialize(self, args, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None,
-								 targets_lengths=None, gta=False,global_step=None, is_training=False, is_evaluating=False,
+								 targets_lengths=None, gta=False, global_step=None, is_training=False, is_evaluating=False,
 								 split_infos=None, emt_labels=None, spk_labels=None, emt_up_labels=None, spk_up_labels=None, spk_emb=None,
 								 ref_mel_emt = None, ref_mel_spk = None, ref_mel_up_emt = None, ref_mel_up_spk = None, use_emt_disc = False,
 								 use_spk_disc = False, use_intercross=False, use_unpaired = False, n_emt=None, n_spk=None, synth=False):
@@ -310,9 +310,9 @@ class Tacotron():
 					prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
 					#Attention Mechanism
 					attention_mechanism = LocationSensitiveAttention(hp.attention_dim, encoder_outputs, hparams=hp,
-																													 is_training=not(args.synth_constraint),
-																													 mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(input_len, [-1]),
-																													 smoothing=hp.smoothing, cumulate_weights=hp.cumulative_weights)
+																	 is_training=not(args.synth_constraint), mask_encoder=hp.mask_encoder,
+																	 memory_sequence_length=tf.reshape(input_len, [-1]),
+																	 smoothing=hp.smoothing, cumulate_weights=hp.cumulative_weights)
 					#Decoder LSTM Cells
 					decoder_lstm = DecoderRNN(is_training, layers=hp.decoder_layers,
 						size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
@@ -391,11 +391,10 @@ class Tacotron():
 														scope='decoder_prenet')
 						# Attention Mechanism
 						attention_mechanism_up = LocationSensitiveAttention(hp.attention_dim, encoder_outputs_up, hparams=hp,
-																														 is_training=not(args.synth_constraint),#is_training,
-																														 mask_encoder=hp.mask_encoder,
-																														 memory_sequence_length=tf.reshape(input_len, [-1]),
-																														 smoothing=hp.smoothing,
-																														 cumulate_weights=hp.cumulative_weights)
+																			is_training=not(args.synth_constraint),#is_training,
+																			mask_encoder=hp.mask_encoder,
+																			memory_sequence_length=tf.reshape(input_len, [-1]),
+																			smoothing=hp.smoothing, cumulate_weights=hp.cumulative_weights)
 						# Decoder LSTM Cells
 						decoder_lstm_up = DecoderRNN(is_training, layers=hp.decoder_layers,
 																			size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate,
@@ -1041,10 +1040,10 @@ class Tacotron():
 					gradients = optimizer.compute_gradients(self.tower_loss[i], var_list=update_vars)
 					tower_gradients.append(gradients)
 
-					if self.args.TEST:
-						print("NORMAL VARS")
-						for v in update_vars:
-							print("normal", v)
+					# if self.args.TEST:
+					# 	print("NORMAL VARS")
+					# 	for v in update_vars:
+					# 		print("normal", v)
 
 
 			# if want to update the encoder and classifier based on different loss
@@ -1054,20 +1053,20 @@ class Tacotron():
 					gradients_r = optimizer_r.compute_gradients(self.tower_loss_no_mo_up[i], var_list=update_vars_r)
 					tower_gradients_r.append(gradients_r)
 
-					if self.args.TEST:
-						print("\nREFNET VARS")
-						for v in update_vars_r:
-							print("refnet", v)
+					# if self.args.TEST:
+					# 	print("\nREFNET VARS")
+					# 	for v in update_vars_r:
+					# 		print("refnet", v)
 
 			if self.args.nat_gan:
 				update_vars_n = [v for v in self.all_vars if ('nat_gan' in v.name)]
 				gradients_n = optimizer_n.compute_gradients(self.tower_d_loss[i], var_list=update_vars_n)
 				tower_gradients_n.append(gradients_n)
 
-				if self.args.TEST:
-					print("\nNAT GAN VARS")
-					for v in update_vars_n:
-						print("nat gan", v)
+				# if self.args.TEST:
+				# 	print("\nNAT GAN VARS")
+				# 	for v in update_vars_n:
+				# 		print("nat gan", v)
 
 		# 3. Average Gradient
 		with tf.device(grad_device):

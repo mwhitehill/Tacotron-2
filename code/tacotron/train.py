@@ -15,6 +15,8 @@ from tacotron.models import create_model
 from tacotron.utils import ValueWindow, plot
 from tacotron.utils.text import sequence_to_text
 from tacotron.utils.symbols import symbols
+from tacotron.synthesize import get_filenames_from_metadata
+from tacotron.synthesizer import filenames_to_inputs, get_output_lengths
 from tqdm import tqdm
 
 log = infolog.log
@@ -22,6 +24,32 @@ log = infolog.log
 
 def time_string():
 	return datetime.now().strftime('%Y-%m-%d %H:%M')
+
+def get_eval_feed_dict(hparams, eval_model, input_dir, flip_spk_emt):
+
+
+	#eval synthesis data
+	synth_metadata_filename = r"../data/synth_emt4.txt"
+	texts, basenames, basenames_refs, mel_filenames, \
+	mel_ref_filenames_emt, mel_ref_filenames_spk, \
+	emt_labels, spk_labels = get_filenames_from_metadata(synth_metadata_filename,
+														 input_dir, flip_spk_emt)
+
+	basenames, basenames_refs, inputs, input_lengths, split_infos, mel_refs_emt, mel_refs_spk, \
+	emt_labels, spk_labels = filenames_to_inputs(hparams, texts, basenames, mel_filenames,
+												 basenames_refs, mel_ref_filenames_emt,
+												 mel_ref_filenames_spk, emt_labels,
+												 spk_labels)
+	feed_dict = {
+		eval_model.synth_inputs: inputs,
+		eval_model.synth_input_lengths: input_lengths,
+		eval_model.synth_split_infos: split_infos,
+		eval_model.synth_mel_refs_emt: mel_refs_emt,
+		eval_model.synth_mel_refs_spk: mel_refs_spk,
+	}
+
+	return(feed_dict, emt_labels, spk_labels,basenames, basenames_refs)
+
 
 def add_embedding_stats(summary_writer, embedding_names, paths_to_meta, checkpoint_path):
 	#Create tensorboard projector
@@ -112,33 +140,39 @@ def model_train_mode(args, feeder, hparams, global_step):
 		stats = add_train_stats(model, hparams)
 		return model, stats
 
-def model_test_mode(args, feeder, hparams, global_step):
+def model_test_mode(args, hparams, train_model): #feeder,global_step):
 	with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
+
 		model_name = 'Tacotron_emt_attn' if args.emt_attn else 'Tacotron'
 		model = create_model(model_name, hparams)
-		if hparams.predict_linear:
-			raise ValueError('predict linear not implemented')
-			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
-				linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
-				is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos, emt_labels = feeder.eval_emt_labels,
-				spk_labels = feeder.spk_labels, spk_emb= feeder.eval_spk_emb, ref_mel_emt=feeder.ref_mel_emt, ref_mel_spk= feeder.ref_mel_spk,
-				use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc, use_intercross=args.intercross,
-				n_emt = len(feeder.total_emt), n_spk = len(feeder.total_spk))
-		else:
 
-			ref_mel_emt = feeder.eval_ref_mel_emt if not(args.flip_spk_emt) else feeder.eval_ref_mel_spk
-			ref_mel_spk = feeder.eval_ref_mel_spk if not (args.flip_spk_emt) else feeder.eval_ref_mel_emt
-			emt_labels = feeder.eval_emt_labels if not (args.flip_spk_emt) else feeder.eval_spk_labels
-			spk_labels = feeder.eval_spk_labels if not (args.flip_spk_emt) else feeder.eval_emt_labels
-			n_emt = len(feeder.total_emt) if not (args.flip_spk_emt) else len(feeder.total_spk)
-			n_spk = len(feeder.total_spk) if not (args.flip_spk_emt) else len(feeder.total_emt)
+		model.synth_inputs = tf.placeholder(tf.int32, (None, None), name='synth_inputs')
+		model.synth_input_lengths = tf.placeholder(tf.int32, (None), name='synth_input_lengths')
+		model.synth_split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='synth_split_infos')
 
-			model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
-				targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
-				split_infos=feeder.eval_split_infos, emt_labels=emt_labels, spk_labels=spk_labels,
-				ref_mel_emt=ref_mel_emt, ref_mel_spk= ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
-				use_intercross=args.intercross, n_emt = n_emt, n_spk =n_spk)
-		model.add_loss()
+		model.synth_mel_refs_emt = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='synth_mel_refs_emt')
+		model.synth_mel_refs_spk = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='synth_mel_refs_spk')
+
+
+
+		model.initialize(args, model.synth_inputs, model.synth_input_lengths, split_infos=model.synth_split_infos,
+						 ref_mel_emt=model.synth_mel_refs_emt, ref_mel_spk=model.synth_mel_refs_spk, n_emt=train_model.n_emt, n_spk=1)
+
+		# model.add_loss()
+
+		# ref_mel_emt = feeder.eval_ref_mel_emt if not(args.flip_spk_emt) else feeder.eval_ref_mel_spk
+		# ref_mel_spk = feeder.eval_ref_mel_spk if not (args.flip_spk_emt) else feeder.eval_ref_mel_emt
+		# emt_labels = feeder.eval_emt_labels if not (args.flip_spk_emt) else feeder.eval_spk_labels
+		# spk_labels = feeder.eval_spk_labels if not (args.flip_spk_emt) else feeder.eval_emt_labels
+		# n_emt = len(feeder.total_emt) if not (args.flip_spk_emt) else len(feeder.total_spk)
+		# n_spk = len(feeder.total_spk) if not (args.flip_spk_emt) else len(feeder.total_emt)
+
+		# model.initialize(args, feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
+		# 	targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True,
+		# 	split_infos=feeder.eval_split_infos, emt_labels=emt_labels, spk_labels=spk_labels,
+		# 	ref_mel_emt=ref_mel_emt, ref_mel_spk= ref_mel_spk, use_emt_disc = args.emt_disc, use_spk_disc = args.spk_disc,
+		# 	use_intercross=args.intercross, n_emt = n_emt, n_spk =n_spk)
+
 		return model
 
 def train(log_dir, args, hparams):
@@ -184,10 +218,10 @@ def train(log_dir, args, hparams):
 	#Set up model:
 	global_step = tf.Variable(0, name='global_step', trainable=False)
 	model, stats = model_train_mode(args, feeder, hparams, global_step)
-	eval_model = model_test_mode(args, feeder, hparams, global_step)
-	if args.TEST:
-		for v in tf.global_variables():
-			print(v)
+	eval_model = model_test_mode(args, hparams, model)
+	# if args.TEST:
+	# 	for v in tf.global_variables():
+	# 		print(v)
 
 	#Embeddings metadata
 	char_embedding_meta = os.path.join(meta_folder, 'CharacterEmbeddings.tsv')
@@ -260,6 +294,10 @@ def train(log_dir, args, hparams):
 	config = tf.ConfigProto()
 	config.gpu_options.allow_growth = True
 	config.allow_soft_placement = True
+
+	eval_feed_dict, emt_labels, spk_labels, \
+	basenames, basenames_refs = get_eval_feed_dict(hparams, eval_model,
+												   args.input_dir, args.flip_spk_emt)
 
 	#Train
 	with tf.Session(config=config) as sess:
@@ -591,64 +629,76 @@ def train(log_dir, args, hparams):
 						# 	max_len=target_length, auto_aspect=True)
 
 					else:
-						input_seqs, mel_predictions, alignments, targets, target_lengths, emts, spks, alignments_emt = sess.run([
-							eval_model.tower_inputs[0],
-							eval_model.tower_mel_outputs[0],
-							eval_model.tower_alignments[0],
-							eval_model.tower_mel_targets[0],
-							eval_model.tower_targets_lengths[0],
-							eval_model.tower_emt_labels[0],
-							eval_model.tower_spk_labels[0],
-							eval_model.tower_alignments_emt
-							])
+						input_seqs, mels, alignments,\
+						stop_tokens = sess.run([eval_model.tower_inputs,
+												eval_model.tower_mel_outputs,
+												eval_model.tower_alignments,
+												eval_model.tower_stop_token_prediction],
+											    feed_dict=eval_feed_dict)
 
-						num_evals = len(input_seqs) if False else 1
-						for i in range(num_evals):
-							input_seq = input_seqs[i]
-							mel_prediction = mel_predictions[i]
-							alignment = alignments[i]
-							target = targets[i]
-							target_length = target_lengths[i]
-							emt = emts[i]
-							spk = spks[i]
-							if args.emt_attn and args.attn=='simple':
-								alignment_emt = alignments_emt[0][i]
+						# num_evals = len(input_seqs) if False else 1
+						# for i in range(num_evals):
+						# 	input_seq = input_seqs[i]
+						# 	mel_prediction = mel_predictions[i]
+						# 	alignment = alignments[i]
+						# 	target = targets[i]
+						# 	target_length = target_lengths[i]
+						# 	emt = emts[i]
+						# 	spk = spks[i]
+						# 	if args.emt_attn and args.attn=='simple':
+						# 		alignment_emt = alignments_emt[0][i]
 
-							#save predicted mel spectrogram to disk (debug)
-							mel_filename = 'mel-prediction-step-{}_{}.npy'.format(step,i)
-							np.save(os.path.join(mel_dir, mel_filename), mel_prediction.T, allow_pickle=False)
+						# Linearize outputs (n_gpus -> 1D)
+						inp = [inp for gpu_inp in input_seqs for inp in gpu_inp]
+						mels = [mel for gpu_mels in mels for mel in gpu_mels]
+						# targets = [target for gpu_targets in targets for target in gpu_targets]
+						alignments = [align for gpu_aligns in alignments for align in gpu_aligns]
+						stop_tokens = [token for gpu_token in stop_tokens for token in gpu_token]
 
-							folder_bucket = 'step_{}'.format(step//500)
-							folder_wavs_save = os.path.join(wav_dir,folder_bucket)
-							folder_plot_save = os.path.join(plot_dir,folder_bucket)
-							os.makedirs(folder_wavs_save, exist_ok=True)
-							os.makedirs(folder_plot_save, exist_ok=True)
+						target_lengths = get_output_lengths(stop_tokens)
+
+						# Take off the batch wise padding
+						mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
+
+						T2_output_range = (-hparams.max_abs_value, hparams.max_abs_value) if hparams.symmetric_mels else (0, hparams.max_abs_value)
+						mels = [np.clip(m, T2_output_range[0], T2_output_range[1]) for m in mels]
+
+						folder_bucket = 'step_{}'.format(step//500)
+						folder_wavs_save = os.path.join(wav_dir,folder_bucket)
+						folder_plot_save = os.path.join(plot_dir,folder_bucket)
+						os.makedirs(folder_wavs_save, exist_ok=True)
+						os.makedirs(folder_plot_save, exist_ok=True)
+
+						for i, (mel,align,basename,basename_ref) in enumerate(zip(mels, alignments,basenames, basenames_refs)):
 
 							#save griffin lim inverted wav for debug (mel -> wav)
 							if hparams.GL_on_GPU:
-								wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel_prediction})
+								wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel})
 								wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
 							else:
-								wav = audio.inv_mel_spectrogram(mel_prediction.T, hparams)
-							audio.save_wav(wav, os.path.join(folder_wavs_save, 'step-{}-{}-wave-from-mel.wav'.format(step,i)), sr=hparams.sample_rate)
+								wav = audio.inv_mel_spectrogram(mel.T, hparams)
+							audio.save_wav(wav, os.path.join(folder_wavs_save, 'step_{}_wav_{}_{}_{}.wav'.format(step, i, basename, basename_ref)),
+										   																		 sr=hparams.sample_rate)
 
-							input_seq = sequence_to_text(input_seq)
+							input_seq = sequence_to_text(inp[i])
 							#save alignment plot to disk (control purposes)
 							try:
-								plot.plot_alignment(alignment, os.path.join(folder_plot_save, 'step-{}-{}-align.png'.format(step, i)),
-									title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
-									max_len=target_length // hparams.outputs_per_step)
-								if args.emt_attn and args.attn=='simple':
-									plot.plot_alignment(alignment_emt, os.path.join(folder_plot_save, 'step-{}-{}-align_emt.png'.format(step, i)),
-										title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk),input_seq),
-										max_len=target_length // hparams.outputs_per_step)
-								#save real and predicted mel-spectrogram plot to disk (control purposes)
-								plot.plot_spectrogram(mel_prediction, os.path.join(folder_plot_save, 'step-{}-{}-mel-spectrogram.png'.format(step, i)),
-									title='{}, {}, step={}, loss={:.5f}, e{}, s{}\n{}'.format(args.model, time_string(), step, loss, int(emt), int(spk), input_seq), target_spectrogram=target,
-									max_len=target_length)
+								plot.plot_alignment(align, os.path.join(folder_plot_save, 'step_{}_wav_{}_{}_{}_align.png'.format(step, i, basename, basename_ref)),
+									title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq),
+									max_len=target_lengths[i] // hparams.outputs_per_step)
 							except:
-								print("failed to plot alignment and spectrogram")
-							log('Input at step {}: {}'.format(step, input_seq), end='\r')
+								print("failed to plot alignment")
+							try:
+								#save real and predicted mel-spectrogram plot to disk (control purposes)
+								plot.plot_spectrogram(mel, os.path.join(folder_plot_save, 'step-{}-{}-mel-spectrogram.png'.format(step, i)),
+													  title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq))
+													  # target_spectrogram=targets[i],
+													  # max_len=target_lengths[i])
+							except:
+								print("failed to plot spectrogram")
+
+						log('Saved synthesized samples for step {}'.format(step), end='\r')
+						# log('Input at step {}: {}'.format(step, input_seq), end='\r')
 
 				# if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == 1:
 				# 	#Get current checkpoint state

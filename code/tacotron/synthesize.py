@@ -82,31 +82,17 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 	log('synthesized mel spectrograms at {}'.format(eval_dir))
 	return eval_dir
 
-def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
-	GTA = (args.GTA == 'True')
-	if GTA:
-		synth_dir = os.path.join(output_dir, 'gta')
+def get_filenames_from_metadata(synth_metadata_filename, input_dir, flip_spk_emt=False):
 
-		#Create output path if it doesn't exist
-		os.makedirs(synth_dir, exist_ok=True)
-	else:
-		synth_dir = os.path.join(output_dir, 'natural')
-
-		#Create output path if it doesn't exist
-		os.makedirs(synth_dir, exist_ok=True)
-
-	log(hparams_debug_string())
-	synth = Synthesizer()
-	synth.load(args, checkpoint_path, hparams, gta=GTA)
-	with open(args.metadata_filename, encoding='utf-8') as f:
+	with open(synth_metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f if not(line.startswith('#'))]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
 		hours = sum([int(x[6]) for x in metadata]) * frame_shift_ms / (3600)
-		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
+		log('Synthesis - Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
 
-	log('Starting Synthesis')
+	# log('Starting Synthesis')
 	texts = [m[7] for m in metadata]
-	mel_filenames = [os.path.join(args.input_dir, m[0], 'mels', m[2]) for m in metadata]
+	mel_filenames = [os.path.join(input_dir, m[0], 'mels', m[2]) for m in metadata]
 	basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
 	basenames_refs = [m[11]+'_'+m[13] for m in metadata]
 
@@ -117,34 +103,50 @@ def run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams):
 	for m in metadata:
 		dataset = m[0]
 		if m[12] == 'same':
-			mel_ref_filenames_emt.append(os.path.join(args.input_dir, m[0], 'mels', m[2]))
+			mel_ref_filenames_emt.append(os.path.join(input_dir, dataset, 'mels', m[2]))
 		else:
-			if 'accent' in args.metadata_filename:
+			if 'accent' in synth_metadata_filename:
 				dataset_emt = 'vctk'
 			else:
 				dataset_emt = 'emth' if m[12][0] == 'h' else 'emt4'
 				if m[12][0] == 'h':
 					m[12] = m[12][1:]
-			mel_ref_filenames_emt.append(os.path.join(args.input_dir, dataset_emt , 'mels', m[12]))
+			mel_ref_filenames_emt.append(os.path.join(input_dir, dataset_emt , 'mels', m[12]))
 
 		if m[14] == 'same':
-			mel_ref_filenames_spk.append(os.path.join(args.input_dir, m[0],'mels', m[2]))
+			mel_ref_filenames_spk.append(os.path.join(input_dir, dataset,'mels', m[2]))
 		else:
-			mel_ref_filenames_spk.append(os.path.join(args.input_dir, 'vctk', 'mels', m[14]))
+			mel_ref_filenames_spk.append(os.path.join(input_dir, 'jessa', 'mels', m[14]))
 		emt_labels.append(m[8])
 		spk_labels.append(m[9])
-	if args.flip_spk_emt:
+	if flip_spk_emt:
 		mel_ref_filenames_emt_tmp = mel_ref_filenames_emt
 		mel_ref_filenames_emt = mel_ref_filenames_spk
 		mel_ref_filenames_spk = mel_ref_filenames_emt_tmp
 
-	mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, synth_dir, mel_filenames,
-																											 basenames_refs=basenames_refs,
-																											 mel_ref_filenames_emt=mel_ref_filenames_emt,
-																											 mel_ref_filenames_spk=mel_ref_filenames_spk,
-																											 emt_labels_synth=emt_labels, spk_labels_synth=spk_labels)
+	return(texts, basenames, basenames_refs, mel_filenames, mel_ref_filenames_emt, mel_ref_filenames_spk,
+		   emt_labels, spk_labels)
 
-	return None
+
+def run_synthesis_sytle_transfer(args, synth_metadata_filename, checkpoint_path, output_dir, hparams):
+
+	synth_dir = os.path.join(output_dir, 'natural')
+
+	#Create output path if it doesn't exist
+	os.makedirs(synth_dir, exist_ok=True)
+
+	log(hparams_debug_string())
+	synth = Synthesizer()
+	synth.load(args, checkpoint_path, hparams)
+
+	texts, basenames, basenames_refs, mel_filenames, \
+	mel_ref_filenames_emt, mel_ref_filenames_spk,\
+	emt_labels, spk_labels = get_filenames_from_metadata(synth_metadata_filename, args.input_dir, args.flip_spk_emt)
+
+	synth.synthesize(texts, basenames, synth_dir,synth_dir, mel_filenames,
+					 mel_ref_filenames_emt=mel_ref_filenames_emt,
+					 mel_ref_filenames_spk=mel_ref_filenames_spk,
+					 emt_labels_synth=emt_labels,spk_labels_synth=spk_labels)
 
 def synthesize_random(args, checkpoint_path, output_dir,
 											hparams, model_suffix):
@@ -408,7 +410,7 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None, model_suffix=
 		return run_eval(args, checkpoint_path, output_dir, hparams, sentences)
 	elif args.mode == 'synthesis':
 		# return run_synthesis(args, checkpoint_path, output_dir, hparams)
-		return run_synthesis_sytle_transfer(args, checkpoint_path, output_dir, hparams)
+		return run_synthesis_sytle_transfer(args, args.metadata_filename, checkpoint_path, output_dir, hparams)
 	elif args.mode == 'synthesis_multiple':
 		run_synthesis_multiple(args, checkpoint_path, output_dir, hparams, model_suffix)
 	elif args.mode == 'synthesis_random':

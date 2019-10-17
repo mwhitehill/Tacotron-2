@@ -98,7 +98,7 @@ def main():
 	parser.add_argument('--wavenet_input', default='tacotron_output/gta/map.txt')
 	parser.add_argument('--name', help='Name of logging directory.')
 	parser.add_argument('--model', default='Tacotron-2')
-	parser.add_argument('--input_dir', default='training_data', help='folder to contain inputs sentences/targets')
+	parser.add_argument('--input_dir', default='../data', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
@@ -165,7 +165,7 @@ def main():
 	log_dir, hparams = prepare_run(args)
 
 	import socket
-	if socket.gethostname() == 'A3907623':
+	if socket.gethostname() in ['A3907623','MININT-39T168F']:
 		hparams.tacotron_num_gpus = 1
 		hparams.tacotron_batch_size = 32
 

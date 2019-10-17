@@ -62,13 +62,13 @@ class Synthesizer:
 		self.gta = gta
 		self._hparams = hparams
 		#pad input sequences with the <pad_token> 0 ( _ )
-		self._pad = 0
+		# self._pad = 0
 		#explicitely setting the padding to a value that doesn't originally exist in the spectogram
 		#to avoid any possible conflicts, without affecting the output range of the model too much
-		if hparams.symmetric_mels:
-			self._target_pad = -hparams.max_abs_value
-		else:
-			self._target_pad = 0.
+		# if hparams.symmetric_mels:
+		# 	self._target_pad = -hparams.max_abs_value
+		# else:
+		# 	self._target_pad = 0.
 
 		self.inputs = inputs
 		self.input_lengths = input_lengths
@@ -93,88 +93,45 @@ class Synthesizer:
 		saver = tf.train.Saver()
 		saver.restore(self.session, checkpoint_path)
 
-
 	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, basenames_refs=None,
 								 mel_ref_filenames_emt=None, mel_ref_filenames_spk=None, emb_only=False,
 								 emt_labels_synth=None, spk_labels_synth=None):
-
 		hparams = self._hparams
-		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
-		#[-max, max] or [0,max]
-		T2_output_range = (-hparams.max_abs_value, hparams.max_abs_value) if hparams.symmetric_mels else (0, hparams.max_abs_value)
+		# [-max, max] or [0,max]
+		T2_output_range = (-hparams.max_abs_value, hparams.max_abs_value) if hparams.symmetric_mels else (
+		0, hparams.max_abs_value)
 
-		#Repeat last sample until number of samples is dividable by the number of GPUs (last run scenario)
-		while len(texts) % hparams.tacotron_synthesis_batch_size != 0:
-			texts.append(texts[-1])
-			basenames.append(basenames[-1])
-			basenames_refs.append(basenames_refs[-1])
-			if mel_filenames is not None:
-				mel_filenames.append(mel_filenames[-1])
-			if mel_ref_filenames_emt is not None:
-				mel_ref_filenames_emt.append(mel_ref_filenames_emt[-1])
-			if mel_ref_filenames_spk is not None:
-				mel_ref_filenames_spk.append(mel_ref_filenames_spk[-1])
-			if emt_labels_synth is not None:
-				emt_labels_synth.append(emt_labels_synth[-1])
-			if spk_labels_synth is not None:
-				spk_labels_synth.append(spk_labels_synth[-1])
-
-		assert 0 == len(texts) % self._hparams.tacotron_num_gpus
-		seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
-		input_lengths = [len(seq) for seq in seqs]
-		size_per_device = len(seqs) // self._hparams.tacotron_num_gpus
-
-		#Pad inputs according to each GPU max length
-		input_seqs = None
-		split_infos = []
-
-		np_mel_refs_emt = [np.load(f) for f in mel_ref_filenames_emt]
-		np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
-
-		mel_ref_seqs_emt = None
-		mel_ref_seqs_spk = None
-
-		for i in range(self._hparams.tacotron_num_gpus):
-			device_input = seqs[size_per_device*i: size_per_device*(i+1)]
-			device_input, max_seq_len = self._prepare_inputs(device_input)
-
-			input_seqs = np.concatenate((input_seqs, device_input), axis=1) if input_seqs is not None else device_input
-
-			device_mel_ref_emt = np_mel_refs_emt[size_per_device * i: size_per_device * (i + 1)]
-			device_mel_ref_emt, max_mel_ref_len_emt = self._prepare_targets(device_mel_ref_emt, self._hparams.outputs_per_step)
-			mel_ref_seqs_emt = np.concatenate((mel_ref_seqs_emt, device_mel_ref_emt), axis=1) if mel_ref_seqs_emt is not None else device_mel_ref_emt
-
-			device_mel_ref_spk = np_mel_refs_spk[size_per_device * i: size_per_device * (i + 1)]
-			device_mel_ref_spk, max_mel_ref_len_spk = self._prepare_targets(device_mel_ref_spk, self._hparams.outputs_per_step)
-			mel_ref_seqs_spk = np.concatenate((mel_ref_seqs_spk, device_mel_ref_spk), axis=1) if mel_ref_seqs_spk is not None else device_mel_ref_spk
-
-			split_infos.append([max_seq_len, 0, 0, 0, 0, max_mel_ref_len_emt, max_mel_ref_len_spk])
-
+		basenames, basenames_refs, input_seqs, input_lengths, split_infos, mel_ref_seqs_emt, mel_ref_seqs_spk,\
+		emt_labels_synth, spk_labels_synth = filenames_to_inputs(hparams, texts, basenames, mel_filenames,
+																 basenames_refs, mel_ref_filenames_emt,
+																 mel_ref_filenames_spk, emt_labels_synth,
+																 spk_labels_synth)
 		feed_dict = {
 			self.inputs: input_seqs,
-			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
+			self.input_lengths: input_lengths,
 			self.mel_refs_emt: mel_ref_seqs_emt,
 			self.mel_refs_spk: mel_ref_seqs_spk,
-			self.spk_labels: np.asarray(spk_labels_synth, dtype=np.int32),
-			self.emt_labels: np.asarray(emt_labels_synth, dtype=np.int32)
+			self.spk_labels: spk_labels_synth,
+			self.emt_labels: emt_labels_synth,
+			self.split_infos: split_infos
 		}
 
-		if self.gta:
-			np_targets = [np.load(mel_filename) for mel_filename in mel_filenames]
-			target_lengths = [len(np_target) for np_target in np_targets]
+		# if self.gta:
+		# 	np_targets = [np.load(mel_filename) for mel_filename in mel_filenames]
+		# 	target_lengths = [len(np_target) for np_target in np_targets]
+		#
+		# 	#pad targets according to each GPU max length
+		# 	target_seqs = None
+		# 	for i in range(self._hparams.tacotron_num_gpus):
+		# 		device_target = np_targets[size_per_device*i: size_per_device*(i+1)]
+		# 		device_target, max_target_len = self._prepare_targets(device_target, self._hparams.outputs_per_step, target_pad=self._target_pad)
+		# 		target_seqs = np.concatenate((target_seqs, device_target), axis=1) if target_seqs is not None else device_target
+		# 		split_infos[i][1] = max_target_len #Not really used but setting it in case for future development maybe?
+		#
+		# 	feed_dict[self.targets] = target_seqs
+		# 	assert len(np_targets) == len(texts)
 
-			#pad targets according to each GPU max length
-			target_seqs = None
-			for i in range(self._hparams.tacotron_num_gpus):
-				device_target = np_targets[size_per_device*i: size_per_device*(i+1)]
-				device_target, max_target_len = self._prepare_targets(device_target, self._hparams.outputs_per_step)
-				target_seqs = np.concatenate((target_seqs, device_target), axis=1) if target_seqs is not None else device_target
-				split_infos[i][1] = max_target_len #Not really used but setting it in case for future development maybe?
-
-			feed_dict[self.targets] = target_seqs
-			assert len(np_targets) == len(texts)
-
-		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
+		# feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
 		if emb_only:
 			if self.args.emt_attn:
@@ -192,21 +149,14 @@ class Synthesizer:
 
 		if self.gta or not hparams.predict_linear:
 			if self.args.attn == 'style_tokens':
-				mels, alignments, stop_tokens = self.session.run([self.mel_outputs,
-																										self.alignments,
-																										self.stop_token_prediction],
-																									 feed_dict=feed_dict)
+				mels, alignments, stop_tokens = self.session.run([self.mel_outputs,self.alignments,self.stop_token_prediction],
+																 feed_dict=feed_dict)
 			else:
 				mels, alignments, stop_tokens, refnet_emt,\
-				ref_emt, alignments_emt = self.session.run([self.mel_outputs,
-																													self.alignments,
-																													self.stop_token_prediction,
-																													self.model.tower_refnet_out_emt[0],
-																													self.model.tower_ref_mel_emt[0],
-																													self.model.tower_alignments_emt],
-																													#self.model.tower_context_emt[0],
-																													#self.model.tower_refnet_out_spk[0]],
-																										feed_dict=feed_dict)
+				ref_emt, alignments_emt = self.session.run([self.mel_outputs,self.alignments,self.stop_token_prediction,
+															self.model.tower_refnet_out_emt[0],self.model.tower_ref_mel_emt[0],
+															self.model.tower_alignments_emt],#self.model.tower_context_emt[0],#self.model.tower_refnet_out_spk[0]],
+														    feed_dict=feed_dict)
 
 			# import pandas as pd
 			# df_cont = pd.DataFrame(cont[0])
@@ -233,7 +183,7 @@ class Synthesizer:
 			if not self.gta:
 				#Natural batch synthesis
 				#Get Mel lengths for the entire batch from stop_tokens predictions
-				target_lengths = self._get_output_lengths(stop_tokens)
+				target_lengths = get_output_lengths(stop_tokens)
 
 			#Take off the batch wise padding
 			mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
@@ -251,7 +201,7 @@ class Synthesizer:
 
 			#Natural batch synthesis
 			#Get Mel/Linear lengths for the entire batch from stop_tokens predictions
-			target_lengths = self._get_output_lengths(stop_tokens)
+			target_lengths = get_output_lengths(stop_tokens)
 
 			#Take off the batch wise padding
 			mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
@@ -344,26 +294,94 @@ class Synthesizer:
 
 		return saved_mels_paths, speaker_ids
 
-	def _round_up(self, x, multiple):
-		remainder = x % multiple
-		return x if remainder == 0 else x + multiple - remainder
+def filenames_to_inputs(hparams, texts, basenames, mel_filenames, basenames_refs=None,
+						mel_ref_filenames_emt=None,
+						mel_ref_filenames_spk=None, emt_labels_synth=None, spk_labels_synth=None):
 
-	def _prepare_inputs(self, inputs):
-		max_len = max([len(x) for x in inputs])
-		return np.stack([self._pad_input(x, max_len) for x in inputs]), max_len
+	pad = 0
+	target_pad = -hparams.max_abs_value if hparams.symmetric_mels else 0
+	cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 
-	def _pad_input(self, x, length):
-		return np.pad(x, (0, length - x.shape[0]), mode='constant', constant_values=self._pad)
+	# Repeat last sample until number of samples is dividable by the number of GPUs (last run scenario)
+	while len(texts) % hparams.tacotron_synthesis_batch_size != 0:
+		texts.append(texts[-1])
+		basenames.append(basenames[-1])
+		basenames_refs.append(basenames_refs[-1])
+		if mel_filenames is not None:
+			mel_filenames.append(mel_filenames[-1])
+		if mel_ref_filenames_emt is not None:
+			mel_ref_filenames_emt.append(mel_ref_filenames_emt[-1])
+		if mel_ref_filenames_spk is not None:
+			mel_ref_filenames_spk.append(mel_ref_filenames_spk[-1])
+		if emt_labels_synth is not None:
+			emt_labels_synth.append(emt_labels_synth[-1])
+		if spk_labels_synth is not None:
+			spk_labels_synth.append(spk_labels_synth[-1])
 
-	def _prepare_targets(self, targets, alignment):
-		max_len = max([len(t) for t in targets])
-		data_len = self._round_up(max_len, alignment)
-		return np.stack([self._pad_target(t, data_len) for t in targets]), data_len
+	assert 0 == len(texts) % hparams.tacotron_num_gpus
+	seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
+	input_lengths = [len(seq) for seq in seqs]
+	size_per_device = len(seqs) // hparams.tacotron_num_gpus
 
-	def _pad_target(self, t, length):
-		return np.pad(t, [(0, length - t.shape[0]), (0, 0)], mode='constant', constant_values=self._target_pad)
+	# Pad inputs according to each GPU max length
+	input_seqs = None
+	split_infos = []
 
-	def _get_output_lengths(self, stop_tokens):
-		#Determine each mel length by the stop token predictions. (len = first occurence of 1 in stop_tokens row wise)
-		output_lengths = [row.index(1) if 1 in row else len(row) for row in np.round(stop_tokens).tolist()]
-		return output_lengths
+	np_mel_refs_emt = [np.load(f) for f in mel_ref_filenames_emt]
+	np_mel_refs_spk = [np.load(f) for f in mel_ref_filenames_spk]
+
+	mel_ref_seqs_emt = None
+	mel_ref_seqs_spk = None
+
+	for i in range(hparams.tacotron_num_gpus):
+		device_input = seqs[size_per_device * i: size_per_device * (i + 1)]
+		device_input, max_seq_len = _prepare_inputs(device_input, pad)
+
+		input_seqs = np.concatenate((input_seqs, device_input), axis=1) if input_seqs is not None else device_input
+
+		device_mel_ref_emt = np_mel_refs_emt[size_per_device * i: size_per_device * (i + 1)]
+		device_mel_ref_emt, max_mel_ref_len_emt = _prepare_targets(device_mel_ref_emt, hparams.outputs_per_step,
+																   target_pad=target_pad)
+		mel_ref_seqs_emt = np.concatenate((mel_ref_seqs_emt, device_mel_ref_emt),
+										  axis=1) if mel_ref_seqs_emt is not None else device_mel_ref_emt
+
+		device_mel_ref_spk = np_mel_refs_spk[size_per_device * i: size_per_device * (i + 1)]
+		device_mel_ref_spk, max_mel_ref_len_spk = _prepare_targets(device_mel_ref_spk, hparams.outputs_per_step,
+																   target_pad=target_pad)
+		mel_ref_seqs_spk = np.concatenate((mel_ref_seqs_spk, device_mel_ref_spk),
+										  axis=1) if mel_ref_seqs_spk is not None else device_mel_ref_spk
+
+		split_infos.append([max_seq_len, 0, 0, 0, 0, max_mel_ref_len_emt, max_mel_ref_len_spk])
+
+	input_lengths = np.asarray(input_lengths, dtype=np.int32)
+	spk_labels_synth = np.asarray(spk_labels_synth, dtype=np.int32)
+	emt_labels_synth = np.asarray(emt_labels_synth, dtype=np.int32)
+	split_infos = np.asarray(split_infos, dtype=np.int32)
+
+	return (basenames, basenames_refs, input_seqs, input_lengths, split_infos, mel_ref_seqs_emt, mel_ref_seqs_spk,
+			emt_labels_synth, spk_labels_synth)
+
+
+def _round_up(x, multiple):
+	remainder = x % multiple
+	return x if remainder == 0 else x + multiple - remainder
+
+def _prepare_inputs(inputs, pad):
+	max_len = max([len(x) for x in inputs])
+	return np.stack([_pad_input(x, max_len, pad) for x in inputs]), max_len
+
+def _pad_input(x, length, pad):
+	return np.pad(x, (0, length - x.shape[0]), mode='constant', constant_values=pad)
+
+def _prepare_targets(targets, alignment, target_pad):
+	max_len = max([len(t) for t in targets])
+	data_len = _round_up(max_len, alignment)
+	return np.stack([_pad_target(t, data_len,target_pad) for t in targets]), data_len
+
+def _pad_target(t, length,target_pad):
+	return np.pad(t, [(0, length - t.shape[0]), (0, 0)], mode='constant', constant_values=target_pad)
+
+def get_output_lengths(stop_tokens):
+	#Determine each mel length by the stop token predictions. (len = first occurence of 1 in stop_tokens row wise)
+	output_lengths = [row.index(1) if 1 in row else len(row) for row in np.round(stop_tokens).tolist()]
+	return output_lengths
