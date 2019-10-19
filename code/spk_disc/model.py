@@ -13,6 +13,8 @@ import datetime
 from hparams import hparams
 import pandas as pd
 
+VAL_ITERS = 5
+
 config = get_config()
 
 def time_string():
@@ -50,8 +52,9 @@ def train(path, args):
 
     # embedded = triple_lstm(batch)
     print("Training {} Discriminator Model".format(args.model_type))
-    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3), strides=(2, 2),
-                               is_training=True, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type), depth=hparams.reference_depth)  # [N, 128])
+    encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
+                               strides=(2, 2),is_training=True,
+                               scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type), depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
     embedded = normalize(embedded)
 
@@ -61,12 +64,13 @@ def train(path, args):
         # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
         acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1),predictions=tf.argmax(logit, 1))
+        val_acc, val_acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1), predictions=tf.argmax(logit, 1))
     else:
         # loss
         sim_matrix = similarity(embedded, w, b, args.N, args.M, P=hparams.reference_depth)
         print("similarity matrix size: ", sim_matrix.shape)
         loss = loss_cal(sim_matrix, args.N, args.M, type=config.loss)
-        acc_op = tf.constant(1.)
+        val_acc_op = tf.constant(1.)
 
     # optimizer operation
     trainable_vars= tf.trainable_variables()                # get variable list
@@ -91,6 +95,8 @@ def train(path, args):
     saver = tf.train.Saver(max_to_keep=20)
     loss_window = ValueWindow(100)
     acc_window = ValueWindow(100)
+    val_loss_window = ValueWindow(5)
+    val_acc_window = ValueWindow(5)
 
     # training session
     with tf.Session() as sess:
@@ -135,11 +141,30 @@ def train(path, args):
 
             if step % 10 == 0:
                 writer.add_summary(summary, step)   # write at tensorboard
-            if (step+1) % 20 == 0:
-                messsage = "(iter : %d) loss: %.4f" % ((step+1),loss_window.average)
+            if True:#(step+1) % 20 == 0:
+                val_loss_cur_batch = 0
+                val_acc_cur_batch = 0
+                for iter in range(VAL_ITERS):
+                    if args.discriminator:
+                        batch_iter, _, labels_iter = feeder.random_batch_disc(TEST=True)
+                    else:
+                        batch_iter, _, labels_iter = feeder.random_batch(TEST=True)
+                    # run forward and backward propagation and update parameters
+                    val_loss_cur, val_acc_cur = sess.run([loss, val_acc_op], feed_dict={batch: batch_iter, labels: labels_iter})
+                    val_loss_cur_batch += val_loss_cur
+                    val_acc_cur_batch += val_acc_cur
+                val_loss_cur_batch /= VAL_ITERS
+                val_acc_cur_batch /= VAL_ITERS
+                val_loss_window.append(val_loss_cur_batch)
+                val_acc_window.append(val_acc_cur_batch)
+
+                message = "(iter : %d) loss: %.4f" % ((step+1),loss_window.average)
                 if args.discriminator:
-                    messsage += ', acc: {:.2f}%'.format(acc_window.average)
-                print(messsage)
+                    message += ', acc: {:.2f}%'.format(acc_window.average)
+                message += "val_loss: %.4f" % (val_loss_window.average)
+                if args.discriminator:
+                    message += ', val_acc: {:.2f}%'.format(val_acc_window.average)
+                print(message)
 
             lr_changed=False
             if args.model_type == 'emt':
