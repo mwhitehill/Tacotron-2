@@ -141,7 +141,7 @@ def train(path, args):
 
             if step % 10 == 0:
                 writer.add_summary(summary, step)   # write at tensorboard
-            if True:#(step+1) % 20 == 0:
+            if (step+1) % 20 == 0:
                 val_loss_cur_batch = 0
                 val_acc_cur_batch = 0
                 for iter in range(VAL_ITERS):
@@ -161,7 +161,7 @@ def train(path, args):
                 message = "(iter : %d) loss: %.4f" % ((step+1),loss_window.average)
                 if args.discriminator:
                     message += ', acc: {:.2f}%'.format(acc_window.average)
-                message += "val_loss: %.4f" % (val_loss_window.average)
+                message += ", val_loss: %.4f" % (val_loss_window.average)
                 if args.discriminator:
                     message += ', val_acc: {:.2f}%'.format(val_acc_window.average)
                 print(message)

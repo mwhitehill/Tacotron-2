@@ -657,49 +657,52 @@ def train(log_dir, args, hparams):
 						alignments = [align for gpu_aligns in alignments for align in gpu_aligns]
 						stop_tokens = [token for gpu_token in stop_tokens for token in gpu_token]
 
-						target_lengths = get_output_lengths(stop_tokens)
+						try:
+							target_lengths = get_output_lengths(stop_tokens)
 
-						# Take off the batch wise padding
-						mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
+							# Take off the batch wise padding
+							mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
 
-						T2_output_range = (-hparams.max_abs_value, hparams.max_abs_value) if hparams.symmetric_mels else (0, hparams.max_abs_value)
-						mels = [np.clip(m, T2_output_range[0], T2_output_range[1]) for m in mels]
+							T2_output_range = (-hparams.max_abs_value, hparams.max_abs_value) if hparams.symmetric_mels else (0, hparams.max_abs_value)
+							mels = [np.clip(m, T2_output_range[0], T2_output_range[1]) for m in mels]
 
-						folder_bucket = 'step_{}'.format(step//500)
-						folder_wavs_save = os.path.join(wav_dir,folder_bucket)
-						folder_plot_save = os.path.join(plot_dir,folder_bucket)
-						os.makedirs(folder_wavs_save, exist_ok=True)
-						os.makedirs(folder_plot_save, exist_ok=True)
+							folder_bucket = 'step_{}'.format(step//500)
+							folder_wavs_save = os.path.join(wav_dir,folder_bucket)
+							folder_plot_save = os.path.join(plot_dir,folder_bucket)
+							os.makedirs(folder_wavs_save, exist_ok=True)
+							os.makedirs(folder_plot_save, exist_ok=True)
 
-						for i, (mel,align,basename,basename_ref) in enumerate(zip(mels, alignments,basenames, basenames_refs)):
+							for i, (mel,align,basename,basename_ref) in enumerate(zip(mels, alignments,basenames, basenames_refs)):
 
-							#save griffin lim inverted wav for debug (mel -> wav)
-							if hparams.GL_on_GPU:
-								wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel})
-								wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
-							else:
-								wav = audio.inv_mel_spectrogram(mel.T, hparams)
-							audio.save_wav(wav, os.path.join(folder_wavs_save, 'step_{}_wav_{}_{}_{}.wav'.format(step, i, basename, basename_ref)),
-										   																		 sr=hparams.sample_rate)
+								#save griffin lim inverted wav for debug (mel -> wav)
+								if hparams.GL_on_GPU:
+									wav = sess.run(GLGPU_mel_outputs, feed_dict={GLGPU_mel_inputs: mel})
+									wav = audio.inv_preemphasis(wav, hparams.preemphasis, hparams.preemphasize)
+								else:
+									wav = audio.inv_mel_spectrogram(mel.T, hparams)
+								audio.save_wav(wav, os.path.join(folder_wavs_save, 'step_{}_wav_{}_{}_{}.wav'.format(step, i, basename, basename_ref)),
+																													 sr=hparams.sample_rate)
 
-							input_seq = sequence_to_text(inp[i])
-							#save alignment plot to disk (control purposes)
-							try:
-								plot.plot_alignment(align, os.path.join(folder_plot_save, 'step_{}_wav_{}_{}_{}_align.png'.format(step, i, basename, basename_ref)),
-									title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq),
-									max_len=target_lengths[i] // hparams.outputs_per_step)
-							except:
-								print("failed to plot alignment")
-							try:
-								#save real and predicted mel-spectrogram plot to disk (control purposes)
-								plot.plot_spectrogram(mel, os.path.join(folder_plot_save, 'step-{}-{}-mel-spectrogram.png'.format(step, i)),
-													  title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq))
-													  # target_spectrogram=targets[i],
-													  # max_len=target_lengths[i])
-							except:
-								print("failed to plot spectrogram")
+								input_seq = sequence_to_text(inp[i])
+								#save alignment plot to disk (control purposes)
+								try:
+									plot.plot_alignment(align, os.path.join(folder_plot_save, 'step_{}_wav_{}_{}_{}_align.png'.format(step, i, basename, basename_ref)),
+										title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq),
+										max_len=target_lengths[i] // hparams.outputs_per_step)
+								except:
+									print("failed to plot alignment")
+								try:
+									#save real and predicted mel-spectrogram plot to disk (control purposes)
+									plot.plot_spectrogram(mel, os.path.join(folder_plot_save, 'step-{}-{}-mel-spectrogram.png'.format(step, i)),
+														  title='{}, {}, step={}\n{}'.format(args.model, time_string(), step, input_seq))
+														  # target_spectrogram=targets[i],
+														  # max_len=target_lengths[i])
+								except:
+									print("failed to plot spectrogram")
 
-						log('Saved synthesized samples for step {}'.format(step), end='\r')
+							log('Saved synthesized samples for step {}'.format(step), end='\r')
+						except:
+							print("Couldn't synthesize samples")
 						# log('Input at step {}: {}'.format(step, input_seq), end='\r')
 
 				# if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == 1:

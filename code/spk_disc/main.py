@@ -27,6 +27,7 @@ if __name__ == "__main__":
     parser.add_argument('--restore', action='store_true', default=False,
                         help='whether to restore the model')
     parser.add_argument('--discriminator', action='store_true', default=False,help='whether to use a discriminator as loss')
+    parser.add_argument('--test_data_path')
     args = parser.parse_args()
     if args.model_type == 'emt':
         print("setting N to 4 for training emotions")
@@ -43,15 +44,16 @@ if __name__ == "__main__":
     # start testing
     if args.TEST:
         print("\nTest session")
-        if args.model_type == 'emt':
-            MODEL_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_emt_disc'
-        else:
-            MODEL_PATH =r'C:\Users\t-mawhit\Documents\code\Tacotron-2\tisv_model\checkpoints\zo_jessa_spk_disc'
+        folder_test_models = r'..\spk_disc\test_models'
+        type_suff = 'emt' if args.model_type == 'emt' else 'spk'
+        disc_suff = 'disc' if args.discriminator else 'no_disc'
+        MODEL_PATH = os.path.join(folder_test_models,'zj_{}_{}'.format(type_suff,disc_suff))
 
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\paired'#e40500_test_rs2_20samps'
-        DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'
+        # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'
+        DATA_PATH = args.test_data_path
         if os.path.isdir(MODEL_PATH):
-            test_disc(MODEL_PATH,DATA_PATH, args)
+            test_disc(MODEL_PATH, DATA_PATH, args)
         else:
             raise AssertionError("model path doesn't exist!")
     # start training

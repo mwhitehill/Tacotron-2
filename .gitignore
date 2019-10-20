@@ -4,6 +4,7 @@ checkpoints
 data
 papers
 venv
+venv2
 logs-Tacotron-2
 logs
 .viminfo
