@@ -49,11 +49,13 @@ if __name__ == "__main__":
         disc_suff = 'disc' if args.discriminator else 'no_disc'
         MODEL_PATH = os.path.join(folder_test_models,'zj_{}_{}'.format(type_suff,disc_suff))
 
+        META_PATH = r'../eval/eval_test.txt'
+
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\paired'#e40500_test_rs2_20samps'
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'
         DATA_PATH = args.test_data_path
         if os.path.isdir(MODEL_PATH):
-            test_disc(MODEL_PATH, DATA_PATH, args)
+            test_disc(MODEL_PATH, META_PATH, DATA_PATH, args)
         else:
             raise AssertionError("model path doesn't exist!")
     # start training

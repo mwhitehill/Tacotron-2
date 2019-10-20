@@ -188,10 +188,9 @@ def train(path, args):
             if step % config.save_checkpoint_iters == 0:
                 saver.save(sess, checkpoint_path, global_step=global_step)
 
-def test_disc(path_model, path_data, args):
+def test_disc(path_model, path_meta, path_data, args):
 
-    input_meta_path = os.path.join(path_data, 'meta.csv')
-    df = pd.read_csv(input_meta_path)
+    df = pd.read_csv(path_meta)
     n_samps = len(df.index)
 
     tf.reset_default_graph()  # reset graph
