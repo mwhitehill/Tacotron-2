@@ -190,7 +190,9 @@ def train(path, args):
 
 def test_disc(path_model, path_meta, path_data, args):
 
-    df = pd.read_csv(path_meta)
+    #dataset|audio_filename|mel_filename|linear_filename|spk_emb_filename|time_steps|mel_frames|text|emt_label|spk_label|basename|emt_name|emt_file|spk_name|spk_file
+
+    df = pd.read_csv(path_meta, sep='|')
     n_samps = len(df.index)
 
     tf.reset_default_graph()  # reset graph
@@ -208,10 +210,10 @@ def test_disc(path_model, path_meta, path_data, args):
     # embedded = triple_lstm(batch)
     print("Testing {} Discriminator Model".format(args.model_type))
     encoder = ReferenceEncoder(filters=hparams.reference_filters, kernel_size=(3, 3),
-                               strides=(2, 2), is_training=False, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type),
+                               strides=(2, 2), is_training=True, scope='Tacotron_model/inference/pretrained_ref_enc_{}'.format(args.model_type),
                                depth=hparams.reference_depth)  # [N, 128])
     embedded = encoder(batch)
-
+    embedded = normalize(embedded)
 
     logit = tf.layers.dense(embedded, output_classes,name='Tacotron_model/inference/pretrained_ref_enc_{}_dense'.format(args.model_type))
     logit_sm = tf.nn.softmax(logit)
@@ -240,6 +242,8 @@ def test_disc(path_model, path_meta, path_data, args):
             [loss, acc_op, labels, logit_sm, embedded],
             feed_dict={batch: batch_iter, labels: labels_iter})
         print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur))
+        #print(np.max(log, 1))
+        #print(np.mean(np.max(log, 1)))
         print(np.argmax(log,1))
         print(lbls)
         emb_path = os.path.join(path_data, 'emb.csv')

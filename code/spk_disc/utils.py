@@ -401,8 +401,16 @@ def test_batch(data_path, df, args):
 
     label_type = '{}_label'.format(model_label)
     labels = df.loc[:,label_type].values
-    basenames = df.loc[:, 'basename'].values
-    filenames = [os.path.join(data_path,'mels',b) for b in basenames]
+
+    #basenames = df.loc[:, 'basename'].values
+    #filenames = [os.path.join(data_path,'mels',b) for b in basenames]
+
+    emt_names = df.loc[:, 'emt_name'].values
+    spk_names = df.loc[:, 'spk_name'].values
+    mel_numbers = df.loc[:, 'mel_filename'].values
+    mel_numbers = [m.split('-')[1].split('.')[0] for m in mel_numbers]
+    filenames = [os.path.join(data_path, 'mel-{}_{}_{}.npy'.format(mel_numbers[i], emt_names[i], spk_names[i])) for i in range(len(mel_numbers))]
+
     mels = [np.load(f) for f in filenames]
     mels, max_len = _prepare_targets(mels, hparams.outputs_per_step)
 

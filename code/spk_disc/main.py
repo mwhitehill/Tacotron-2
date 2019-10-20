@@ -19,8 +19,7 @@ if __name__ == "__main__":
                         help='Will remove out the longest samples from EMT4/VCTK')
     parser.add_argument('--test_max_len', action='store_true', default=False,
                         help='Will create batches with the longest samples first to test max batch size')
-    parser.add_argument('--TEST', action='store_true', default=False,
-                        help='Uses small groups of batches to make testing faster')
+    parser.add_argument('--TEST', action='store_true', default=False,help='evaluates samples')
     parser.add_argument('--train_filename', default='../data/train_emt4_jessa.txt')
     parser.add_argument('--model_type', default='emt', help='Options = emt or spk')
     parser.add_argument('--time_string', default=None, help='time string of previous saved model')
@@ -44,12 +43,13 @@ if __name__ == "__main__":
     # start testing
     if args.TEST:
         print("\nTest session")
-        folder_test_models = r'..\spk_disc\test_models'
+        folder_test_models = r'spk_disc/test_models'
         type_suff = 'emt' if args.model_type == 'emt' else 'spk'
         disc_suff = 'disc' if args.discriminator else 'no_disc'
         MODEL_PATH = os.path.join(folder_test_models,'zj_{}_{}'.format(type_suff,disc_suff))
+        print("Model Path:", MODEL_PATH)
 
-        META_PATH = r'../eval/eval_test.txt'
+        META_PATH = r'eval/eval_test.txt'
 
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\paired'#e40500_test_rs2_20samps'
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'

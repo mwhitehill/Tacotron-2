@@ -483,7 +483,6 @@ def test():
 		hparams.tacotron_num_gpus = 1
 		hparams.tacotron_batch_size = 32
 
-
 	tacotron_synthesize(args, hparams, args.checkpoint, model_suffix=model_suffix)
 
 

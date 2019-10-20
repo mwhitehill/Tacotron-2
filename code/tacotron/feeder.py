@@ -98,6 +98,8 @@ class Feeder:
 		self._train_meta = list(np.array(self._metadata)[train_indices])
 		self._test_meta = list(np.array(self._metadata)[test_indices])
 
+		# self.create_test_samps()
+
 		if args.test_max_len:
 			self._train_meta.sort(key=lambda x: int(x[6]),reverse=True)
 			self._test_meta.sort(key=lambda x: int(x[6]), reverse=True)
@@ -576,6 +578,56 @@ class Feeder:
 	def _round_down(self, x, multiple):
 		remainder = x % multiple
 		return x if remainder == 0 else x - remainder
+
+	def create_test_samps(self):
+
+		df_test = pd.DataFrame(self._test_meta)
+		test_meta_arr = np.array(self._test_meta)
+		# df.to_csv(r'../test_data.csv')
+		# df_jessa = df_jessa[df_jessa.iloc[:, 6].astype(int) > 200]
+		df_jessa = df_test[df_test.iloc[:,0] =='jessa']
+		df_emt4 = df_test[df_test.iloc[:, 0] == 'emt4']
+		chosen_idxs_j = np.array([865, 12, 950, 73,1119])
+		chosen_idxs_e = np.array([1499, 1382, 801, 10, 907])#np.random.choice(df_jessa.index.values,5)
+
+		df_test_emotions = pd.DataFrame([])
+		for i in range(4):
+			df_emt = df_emt4[df_emt4.iloc[:, 8] == str(i)]
+			df_emt = df_emt[df_emt.iloc[:, 6].astype(int) > 200]
+			chosen_idxs = np.random.choice(df_emt.index.values, 5)
+			df_test_emotions = df_test_emotions.append(df_emt.loc[chosen_idxs])
+
+		chosen_samps_full = []
+		for chosen_idxs in [chosen_idxs_j, chosen_idxs_e]:
+
+			chosen_samps = test_meta_arr[np.array(chosen_idxs)]
+			for c in chosen_samps:
+				cnt=0
+				for row in df_test_emotions.iterrows():
+					samp_num = cnt%5 +1
+					if cnt<5:
+						emt_name = 'gen'
+						emt_label = 0
+					elif cnt < 10:
+						emt_name = 'angry'
+						emt_label = 1
+					elif cnt < 15:
+						emt_name = 'happy'
+						emt_label = 2
+					elif cnt < 20:
+						emt_name = 'sad'
+						emt_label = 3
+					else:
+						raise ValueError('Too Many Samps')
+
+					emt_name = '{}{}'.format(emt_name,samp_num)
+					c_row = np.append(c[:-1],np.array([emt_name,row[1][2],'same','same']))
+					c_row[8] = emt_label
+					chosen_samps_full.append(c_row)
+					cnt+=1
+		np.savetxt(r'../test_samps.txt',chosen_samps_full,delimiter='|',fmt='%s')
+		raise
+		# df_test_emotions.to_csv(r'../test_emotions.csv')
 
 def test():
 
