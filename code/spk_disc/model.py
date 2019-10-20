@@ -12,6 +12,8 @@ from tensorflow.contrib import rnn
 import datetime
 from hparams import hparams
 import pandas as pd
+import scikitplot as skplt
+import matplotlib.pyplot as plt
 
 VAL_ITERS = 5
 
@@ -221,6 +223,9 @@ def test_disc(path_model, path_meta, path_data, args):
     # loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit,labels=labels_one_hot))
     loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logit, labels=labels_one_hot))
     acc, acc_op = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot, 1), predictions=tf.argmax(logit, 1))
+    batch_size = tf.shape(labels)[0]
+    #acc_e, acc_op_e = tf.metrics.accuracy(labels=tf.argmax(labels_one_hot[:batch_size], 1), predictions=tf.argmax(logit[:batch_size], 1))
+
 
     saver = tf.train.Saver()
 
@@ -244,8 +249,28 @@ def test_disc(path_model, path_meta, path_data, args):
         print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur))
         #print(np.max(log, 1))
         #print(np.mean(np.max(log, 1)))
-        print(np.argmax(log,1))
+        preds = np.argmax(log,1)
+        print(preds)
         print(lbls)
+        df_results = pd.DataFrame([])
+        df_results['preds'] = preds
+        df_results['true'] = lbls
+        batch_size = len(df_results.index)
+        df_results['dataset'] = 'emt4'
+        df_results.loc[df_results.index >= batch_size//2,'dataset']='jessa'
+        df_results.to_csv(os.path.join(path_data,'results.csv'))
+
+        df_jessa = df_results[df_results.dataset=='jessa']
+        pred_cnf = df_jessa.preds
+        true_cnf = df_jessa.true
+        emotions = ['neutral','angry','happy','sad']
+        for i,emt in enumerate(emotions):
+            pred_cnf = np.where(pred_cnf == i, emt, pred_cnf)
+            true_cnf = np.where(true_cnf == i, emt, true_cnf)
+
+        skplt.metrics.plot_confusion_matrix(true_cnf, pred_cnf, labels=emotions, normalize=True)
+        plt.show()
+        
         emb_path = os.path.join(path_data, 'emb.csv')
         emb_meta_path = os.path.join(path_data, 'emb_meta.csv')
         pd.DataFrame(emb).to_csv(emb_path,sep='\t',index=False,header=False)
