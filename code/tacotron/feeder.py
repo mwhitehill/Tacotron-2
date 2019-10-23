@@ -21,12 +21,14 @@ TEST=False
 test_size = (hparams.tacotron_test_size if hparams.tacotron_test_size is not None
 			else hparams.tacotron_test_batches * hparams.tacotron_batch_size)
 
+columns = ['dataset', 'audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps',
+		   'mel_frames', 'text','emt_label', 'spk_label', 'basename', 'sex']
+
 #Not used anymore - generate dataframe from metadata list - allows clipping out short utterances
 def get_metadata_df(path, args):
 
 	# load metadata into a dataframe
-	columns = ['dataset','audio_filename', 'mel_filename', 'linear_filename', 'spk_emb_filename', 'time_steps', 'mel_frames', 'text',
-						 'emt_label', 'spk_label', 'basename', 'sex']
+
 	meta_df = pd.read_csv(path, sep='|')
 	meta_df.columns = columns
 
@@ -98,7 +100,8 @@ class Feeder:
 		self._train_meta = list(np.array(self._metadata)[train_indices])
 		self._test_meta = list(np.array(self._metadata)[test_indices])
 
-		# self.create_test_samps()
+		# self.create_test_samps_fixed(TEST=True)
+		self.create_test_samps_full_test_set(TEST=True)
 
 		if args.test_max_len:
 			self._train_meta.sort(key=lambda x: int(x[6]),reverse=True)
@@ -579,31 +582,40 @@ class Feeder:
 		remainder = x % multiple
 		return x if remainder == 0 else x - remainder
 
-	def create_test_samps(self):
+	def create_test_samps_fixed(self, TEST=True):
 
-		df_test = pd.DataFrame(self._test_meta)
-		test_meta_arr = np.array(self._test_meta)
-		# df.to_csv(r'../test_data.csv')
-		# df_jessa = df_jessa[df_jessa.iloc[:, 6].astype(int) > 200]
-		df_jessa = df_test[df_test.iloc[:,0] =='jessa']
-		df_emt4 = df_test[df_test.iloc[:, 0] == 'emt4']
-		chosen_idxs_j = np.array([865, 12, 950, 73,1119])
-		chosen_idxs_e = np.array([1499, 1382, 801, 10, 907])#np.random.choice(df_jessa.index.values,5)
+		if TEST:
+			df = pd.DataFrame(self._test_meta,columns=columns)
+			meta_arr = np.array(self._test_meta)
+		else:
+			df = pd.DataFrame(self._train_meta, columns=columns)
+			meta_arr = np.array(self._train_meta)
 
-		df_test_emotions = pd.DataFrame([])
+		# df.to_csv(r'../train_data.csv')
+		# raise
+		df_jessa = df[df.iloc[:,0] =='jessa']
+		df_emt4 = df[df.iloc[:, 0] == 'emt4']
+		df_jessa = df_jessa[df_jessa.iloc[:, 6].astype(int) > 200]
+		df_emt4 = df_emt4[df_emt4.iloc[:, 6].astype(int) > 200]
+
+		df_emt4_neutral = df_emt4[df_emt4.iloc[:,8]=='0']
+		chosen_idxs_e = np.random.choice(df_emt4_neutral.index.values,5) # np.array([865, 12, 950, 73,1119])
+		chosen_idxs_j = np.array([135,147,151,162,173,185,189,194,217,228,234]) #np.array([9,11,14,15,19,35,39,59,71,95,122])#np.random.choice(df_jessa.index.values,5)
+
+		df_emotions = pd.DataFrame([])
 		for i in range(4):
 			df_emt = df_emt4[df_emt4.iloc[:, 8] == str(i)]
 			df_emt = df_emt[df_emt.iloc[:, 6].astype(int) > 200]
 			chosen_idxs = np.random.choice(df_emt.index.values, 5)
-			df_test_emotions = df_test_emotions.append(df_emt.loc[chosen_idxs])
+			df_emotions = df_emotions.append(df_emt.loc[chosen_idxs])
 
 		chosen_samps_full = []
-		for chosen_idxs in [chosen_idxs_j, chosen_idxs_e]:
+		for chosen_idxs in [chosen_idxs_j]:#[chosen_idxs_j, chosen_idxs_e]:
 
-			chosen_samps = test_meta_arr[np.array(chosen_idxs)]
+			chosen_samps = meta_arr[np.array(chosen_idxs)]
 			for c in chosen_samps:
 				cnt=0
-				for row in df_test_emotions.iterrows():
+				for row in df_emotions.iterrows():
 					samp_num = cnt%5 +1
 					if cnt<5:
 						emt_name = 'gen'
@@ -627,7 +639,54 @@ class Feeder:
 					cnt+=1
 		np.savetxt(r'../test_samps.txt',chosen_samps_full,delimiter='|',fmt='%s')
 		raise
-		# df_test_emotions.to_csv(r'../test_emotions.csv')
+
+	def create_test_samps_full_test_set(self, TEST=True):
+
+		if TEST:
+			df = pd.DataFrame(self._test_meta, columns=columns)
+			meta_arr = np.array(self._test_meta)
+		else:
+			df = pd.DataFrame(self._train_meta, columns=columns)
+			meta_arr = np.array(self._train_meta)
+
+		# raise
+		emotions = ['gen','angry','happy','sad']
+		df_jessa = df[df.iloc[:, 0] == 'jessa']
+		# df_jessa = df_jessa[df_jessa.iloc[:, 6].astype(int) > 200]
+		df_emt4 = df[df.iloc[:, 0] == 'emt4']
+		df_emt4_neutral = df_emt4[df_emt4.iloc[:, 8] == '0']
+		chosen_idxs_jessa = df_jessa.index.values
+		chosen_idxs_emt4 = df_emt4_neutral.index.values
+		ALTERNATE = True
+		if ALTERNATE:
+			chosen_idxs = np.array([],dtype=int)
+			ci_len = min(len(chosen_idxs_jessa),len(chosen_idxs_emt4))
+			for i in range(ci_len):
+				chosen_idxs = np.append(chosen_idxs,np.array([chosen_idxs_jessa[i],chosen_idxs_emt4[i]]))
+			dataset='both'
+		else:
+			JESSA = False
+			dataset = 'jessa' if JESSA else 'emt4'
+			chosen_idxs = chosen_idxs_jessa if JESSA else chosen_idxs_emt4
+
+		chosen_samps = meta_arr[np.array(chosen_idxs)]
+		print("Writing:",len(chosen_samps), 'samples')
+		chosen_samps_full = []
+		for c in chosen_samps:
+			for i,emt in enumerate(emotions):
+				df_emt = df_emt4[df_emt4.iloc[:, 8] == str(i)]
+				df_emt = df_emt[df_emt.iloc[:, 6].astype(int) > 200]
+				idx = np.random.choice(df_emt.index.values, 1)[0]
+				row_emt = df_emt.loc[idx]
+				c_row = np.append(c[:-1], np.array([emt, row_emt[2], 'same', 'same']))
+				c_row[8] = str(i)
+				chosen_samps_full.append(c_row)
+
+		np.savetxt(r'../full_test_set_{}.txt'.format(dataset), chosen_samps_full, delimiter='|', fmt='%s')
+		time.sleep(.5)
+		raise
+
+# df_test_emotions.to_csv(r'../test_emotions.csv')
 
 def test():
 
