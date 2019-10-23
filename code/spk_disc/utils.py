@@ -408,8 +408,9 @@ def test_batch(data_path, df, args):
     emt_names = df.loc[:, 'emt_name'].values
     spk_names = df.loc[:, 'spk_name'].values
     mel_numbers = df.loc[:, 'mel_filename'].values
+    datasets = df.loc[:, 'dataset'].values
     mel_numbers = [m.split('-')[1].split('.')[0] for m in mel_numbers]
-    filenames = [os.path.join(data_path, 'mel-{}_{}_{}.npy'.format(mel_numbers[i], emt_names[i], spk_names[i])) for i in range(len(mel_numbers))]
+    filenames = [os.path.join(data_path,datasets[i],'natural','mels', 'mel-{}_{}_{}.npy'.format(mel_numbers[i], emt_names[i], spk_names[i])) for i in range(len(mel_numbers))]
 
     mels = [np.load(f) for f in filenames]
     mels, max_len = _prepare_targets(mels, hparams.outputs_per_step)

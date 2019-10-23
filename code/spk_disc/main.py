@@ -49,7 +49,7 @@ if __name__ == "__main__":
         MODEL_PATH = os.path.join(folder_test_models,'zj_{}_{}'.format(type_suff,disc_suff))
         print("Model Path:", MODEL_PATH)
 
-        META_PATH = r'eval/eval_test_full.txt'
+        META_PATH = r'/data/tts_emotion/spk_disc/eval_test_full.txt'
 
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\emt4_jessa_baseline_2\paired'#e40500_test_rs2_20samps'
         # DATA_PATH = r'C:\Users\t-mawhit\Documents\code\Tacotron-2\eval\random\ej_ae_emb_disc_adv\2019.09.19_06-47-32'

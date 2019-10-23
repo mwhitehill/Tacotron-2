@@ -195,7 +195,7 @@ def test_disc(path_model, path_meta, path_data, args):
     #dataset|audio_filename|mel_filename|linear_filename|spk_emb_filename|time_steps|mel_frames|text|emt_label|spk_label|basename|emt_name|emt_file|spk_name|spk_file
 
     df = pd.read_csv(path_meta, sep='|')
-    n_samps = len(df.index)
+    batch_size_np = 100#len(df.index)
 
     tf.reset_default_graph()  # reset graph
 
@@ -205,9 +205,9 @@ def test_disc(path_model, path_meta, path_data, args):
     output_classes = max([int(f) for f in feeder.total_emt]) + 1 if args.model_type in ['emt', 'accent'] else max(
         [int(f) for f in feeder.total_spk]) + 1
 
-    batch = tf.placeholder(shape=[n_samps, None, config.n_mels],
+    batch = tf.placeholder(shape=[None, None, config.n_mels],
                            dtype=tf.float32)  # input batch (time x batch x n_mel)
-    labels = tf.placeholder(shape=[n_samps], dtype=tf.int32)
+    labels = tf.placeholder(shape=[None], dtype=tf.int32)
 
     # embedded = triple_lstm(batch)
     print("Testing {} Discriminator Model".format(args.model_type))
@@ -238,47 +238,64 @@ def test_disc(path_model, path_meta, path_data, args):
         print('Loading checkpoint {}'.format(checkpoint_state.model_checkpoint_path))
         saver.restore(sess, checkpoint_state.model_checkpoint_path)
 
-
-
-        batch_iter, _, labels_iter = test_batch(path_data, df, args)
+        emb_full=None
+        loss_avg=0
+        acc_avg=0
+        cnt=0
+        df_results = pd.DataFrame([],columns=['dataset','preds','true'])
+        for start in np.arange(0,len(df.index),batch_size_np):
+            end = start + batch_size_np
+            df_batch = df.iloc[start:end]
+            batch_iter, _, labels_iter = test_batch(path_data, df_batch, args)
 
         # run forward and backward propagation and update parameters
-        loss_cur, acc_cur, lbls, log, emb = sess.run(
-            [loss, acc_op, labels, logit_sm, embedded],
-            feed_dict={batch: batch_iter, labels: labels_iter})
-        print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur))
-        #print(np.max(log, 1))
-        #print(np.mean(np.max(log, 1)))
-        preds = np.argmax(log,1)
-        print(preds)
-        print(lbls)
-        df_results = pd.DataFrame([])
-        df_results['preds'] = preds
-        df_results['true'] = lbls
-        batch_size = len(df_results.index)
-        df_results['dataset'] = 'emt4'
-        df_results.loc[df_results.index >= batch_size//2,'dataset']='jessa'
+            loss_cur, acc_cur, lbls, log, emb = sess.run(
+                [loss, acc_op, labels, logit_sm, embedded],
+                feed_dict={batch: batch_iter, labels: labels_iter})
+            print('loss: {:.4f}, acc: {:.2f}%'.format(loss_cur, acc_cur*100))
+            #print(np.max(log, 1))
+            #print(np.mean(np.max(log, 1)))
+            emb_full = np.vstack((emb_full, emb)) if emb_full is not None else emb
+            preds = np.argmax(log,1)
+            #print(preds)
+            #print(lbls)
+            df_results_new = pd.DataFrame([])
+            df_results_new['preds'] = preds
+            df_results_new['true'] = lbls
+            df_results_new['dataset'] = 'jessa'
+            df_results = df_results.append(df_results_new,ignore_index=True)
+            loss_avg += loss_cur
+            acc_avg += acc_cur
+            cnt+=1
+        loss_avg = loss_avg/cnt
+        acc_avg = acc_avg/cnt
+        print('Total avg_loss: {:.4f}, avg_acc: {:.2f}%'.format(loss_avg, acc_avg*100))
+       # df_results.loc[df_results.index >= batch_size//2,'dataset']='jessa'
         df_results.to_csv(os.path.join(path_data,'results.csv'))
 
-        df_jessa = df_results[df_results.dataset=='jessa']
-        pred_cnf = df_jessa.preds
-        true_cnf = df_jessa.true
-        emotions = ['neutral','angry','happy','sad']
-        for i,emt in enumerate(emotions):
-            pred_cnf = np.where(pred_cnf == i, emt, pred_cnf)
-            true_cnf = np.where(true_cnf == i, emt, true_cnf)
+        #df_jessa = df_results[df_results.dataset=='jessa']
+        #pred_cnf = df_jessa.preds
+        #true_cnf = df_jessa.true
+        #emotions = ['neutral','angry','happy','sad']
+        #for i,emt in enumerate(emotions):
+            #pred_cnf = np.where(pred_cnf == i, emt, pred_cnf)
+            #true_cnf = np.where(true_cnf == i, emt, true_cnf)
 
-        skplt.metrics.plot_confusion_matrix(true_cnf, pred_cnf, labels=emotions, normalize=True)
-        plt.show()
+        #skplt.metrics.plot_confusion_matrix(true_cnf, pred_cnf, labels=emotions, normalize=True)
+        #plt.show()
         
         emb_path = os.path.join(path_data, 'emb.csv')
+        emb_path_100 = os.path.join(path_data, 'emb_100.csv')
         emb_meta_path = os.path.join(path_data, 'emb_meta.csv')
-        pd.DataFrame(emb).to_csv(emb_path,sep='\t',index=False,header=False)
+        emb_meta_path_100 = os.path.join(path_data, 'emb_meta_100.csv')
+        pd.DataFrame(emb_full).to_csv(emb_path,sep='\t',index=False,header=False)
+        pd.DataFrame(emb_full).iloc[:100].to_csv(emb_path_100,sep='\t',index=False,header=False)
         columns_to_keep = ['dataset', 'mel_filename', 'mel_frames', 'emt_label', 'spk_label', 'basename', 'sex']
         df = df.loc[:, columns_to_keep]
         paired_label = 'paired' if 'paired' in path_data else 'unpaired'
         df['paired'] = paired_label
         df.to_csv(emb_meta_path,sep='\t',index=False)
+        df.iloc[:100].to_csv(emb_meta_path_100,sep='\t',index=False)
 
 def get_embeddings(path, args):
     tf.reset_default_graph()    # reset graph
